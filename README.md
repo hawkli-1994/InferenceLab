@@ -6,6 +6,11 @@
 
 - [需求设计文档](modelbench_agent_requirements_2.md)
 - [技术选型文档](modelbench_agent_tech_selection.md)
+- [Agent Harness](docs/agent_harness.md)
+
+## Agent Harness
+
+本仓库使用 `AGENTS.md` 作为 Codex / 编码 Agent 的项目操作手册。`AGENT.md` 仅作为兼容入口，实际规则以 `AGENTS.md` 为准。
 
 ## MVP 技术方向
 
@@ -14,4 +19,3 @@
 - Frontend: React + Vite + TypeScript + ECharts
 - Reports: Markdown + Pandoc + Typst
 - Deployment: Docker Compose 单实例
-

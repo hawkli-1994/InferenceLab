@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+*.tsbuildinfo
+frontend/dist/
+frontend/.vite/
+
+# Env and secrets
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+
+# Local artifacts
+.DS_Store
+logs/
+reports/
+artifacts/
+data/
+

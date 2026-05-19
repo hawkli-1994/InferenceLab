@@ -4,12 +4,12 @@
 
 ## Phase 0: 项目基线
 
-- [ ] 建立 `backend/` Python 项目骨架：`pyproject.toml`、包结构、测试结构。
-- [ ] 锁定 Python 3.12+、uv、pytest、ruff 基础命令。
-- [ ] 建立最小 `deploy/compose.yaml`：PostgreSQL、Redis、MinIO。
-- [ ] 建立后端配置模型：数据库、Redis、对象存储、SSH、LLM provider。
-- [ ] 建立统一日志、错误响应、请求 ID、健康检查。
-- [ ] 建立后端 CI 本地命令：`uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`。
+- [x] 建立 `backend/` Python 项目骨架：`pyproject.toml`、包结构、测试结构。
+- [x] 锁定 Python 3.12+、uv、pytest、ruff 基础命令。
+- [x] 建立最小 `deploy/compose.yaml`：PostgreSQL、Redis、MinIO。
+- [x] 建立后端配置模型：数据库、Redis、对象存储、SSH、LLM provider。
+- [x] 建立统一日志、错误响应、请求 ID、健康检查。
+- [x] 建立后端 CI 本地命令：`uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`。
 
 ## Phase 1: 后端 API 与数据模型
 

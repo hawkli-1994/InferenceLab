@@ -18,6 +18,12 @@ The product philosophy is intentionally pragmatic: this is an internal workshop-
 
 The repository currently contains requirements, technical selection docs, and agent harness files. Application code should follow the structure proposed in `modelbench_agent_tech_selection.md` unless a later committed architecture document supersedes it.
 
+Primary execution checklist:
+
+- `docs/task_list.md`
+
+Follow the task list order strictly: complete all backend APIs and backend implementation first, pass the backend acceptance gate, then start frontend work. Do not build backend and frontend in parallel.
+
 Expected top-level structure as implementation begins:
 
 ```text
@@ -68,6 +74,7 @@ Preserve these constraints in code and docs:
 ## Coding Rules
 
 - Keep implementation close to the documented MVP. Avoid broad framework introductions and speculative abstractions.
+- Respect the backend-first sequence in `docs/task_list.md`. Do not create `frontend/` or add frontend dependencies until the backend acceptance gate is complete.
 - Use Pydantic models for external API payloads, plugin specs, benchmark results, and LLM structured outputs.
 - Keep shell commands in remote executor modules, not scattered across API handlers or workers.
 - Prefer structured parsers or typed models over ad hoc string handling when outputs are important for reports.

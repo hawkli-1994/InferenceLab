@@ -10,7 +10,7 @@
 
 ## Agent Harness
 
-本仓库使用 `AGENTS.md` 作为 Codex / 编码 Agent 的项目操作手册。`AGENT.md` 仅作为兼容入口，实际规则以 `AGENTS.md` 为准。
+本仓库使用 `AGENTS.md` 作为 Codex / 编码 Agent 的项目操作手册。
 
 ## MVP 技术方向
 

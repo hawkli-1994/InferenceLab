@@ -9,12 +9,10 @@ For Codex-oriented workflows, `AGENTS.md` is the canonical project instruction f
 | File | Purpose |
 |---|---|
 | `AGENTS.md` | Canonical project-wide instructions for coding agents |
-| `AGENT.md` | Compatibility pointer for humans/tools that look for the singular name |
 
 ## Maintenance Rules
 
 - Keep `AGENTS.md` as the source of truth.
-- Keep compatibility files short and point them back to `AGENTS.md`.
 - Do not duplicate long architecture rationale in multiple instruction files.
 - Update the harness when project commands, stack decisions, or repository structure change.
 - Prefer stable instructions over volatile task notes.

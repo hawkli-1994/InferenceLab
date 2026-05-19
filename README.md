@@ -7,6 +7,7 @@
 - [需求设计文档](modelbench_agent_requirements_2.md)
 - [技术选型文档](modelbench_agent_tech_selection.md)
 - [任务清单](docs/task_list.md)
+- [后端 E2E 验收方案](docs/e2e_acceptance.md)
 - [Agent Harness](docs/agent_harness.md)
 
 ## Agent Harness

@@ -128,6 +128,13 @@
 - [ ] 所有后端 API 有 OpenAPI schema。
 - [ ] 所有数据库 migration 可从空库执行成功。
 - [ ] 默认测试不依赖真实 SSH、GPU、NAS、Docker daemon mutation、外部 LLM。
+- [ ] 实现 `tests/e2e/images/ubuntu-target/Dockerfile`。
+- [ ] 实现 `tests/e2e/test_control_plane_fake_executor.py`。
+- [ ] 实现 `tests/e2e/test_bootstrap_ubuntu_target.py`。
+- [ ] 实现 `scripts/ci/wait-for-ssh.sh`。
+- [ ] 固定 GitHub Actions E2E 依赖镜像版本，避免使用浮动 `latest`。
+- [ ] 提交 `tests/e2e/backend_e2e_enabled`，启用 GitHub Actions `Backend E2E` workflow。
+- [ ] GitHub Actions `Backend E2E` workflow 通过。
 - [ ] `uv run pytest` 通过。
 - [ ] `uv run ruff check .` 通过。
 - [ ] `uv run ruff format --check .` 通过。

@@ -10,6 +10,7 @@ Read these documents before making architectural or product-shaping changes:
 
 - `modelbench_agent_requirements_2.md`: product requirements and MVP scope.
 - `modelbench_agent_tech_selection.md`: technical decisions, non-goals, and 10-week implementation map.
+- `docs/e2e_acceptance.md`: backend end-to-end acceptance method and GitHub Actions gate.
 - `docs/agent_harness.md`: how this repository's Codex-oriented instruction harness is organized.
 
 The product philosophy is intentionally pragmatic: this is an internal workshop-grade tool, not an enterprise SaaS platform. Prefer fewer services, explicit data records, reproducible experiments, and useful error messages.
@@ -70,6 +71,7 @@ Preserve these constraints in code and docs:
 - PostgreSQL stores queryable facts and summaries; large logs, raw metrics, reports, and snapshots live in object storage with database references.
 - Default tests must not require real SSH machines, GPUs, NAS, Docker daemon mutation, or external LLM calls.
 - Integration tests that touch real machines or external services must be opt-in and clearly marked.
+- Backend Phase 9 must pass the GitHub Actions E2E gate described in `docs/e2e_acceptance.md` before frontend work starts.
 
 ## Coding Rules
 

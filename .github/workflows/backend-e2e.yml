@@ -1,0 +1,181 @@
+name: Backend E2E
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "deploy/**"
+      - "scripts/ci/**"
+      - "tests/e2e/**"
+      - ".github/workflows/backend-e2e.yml"
+      - "docs/e2e_acceptance.md"
+      - "docs/task_list.md"
+      - "AGENTS.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "deploy/**"
+      - "scripts/ci/**"
+      - "tests/e2e/**"
+      - ".github/workflows/backend-e2e.yml"
+      - "docs/e2e_acceptance.md"
+      - "docs/task_list.md"
+      - "AGENTS.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-e2e-readiness:
+    name: Detect E2E readiness
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Detect backend E2E marker
+        id: detect
+        shell: bash
+        run: |
+          if [[ -f backend/pyproject.toml && -f tests/e2e/backend_e2e_enabled ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Backend E2E is enabled."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Backend E2E is not enabled yet."
+            echo "Required files: backend/pyproject.toml and tests/e2e/backend_e2e_enabled"
+          fi
+
+  backend-e2e:
+    name: Backend E2E
+    needs: detect-e2e-readiness
+    if: needs.detect-e2e-readiness.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: inflab
+          POSTGRES_PASSWORD: inflab
+          POSTGRES_DB: inflab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inflab -d inflab_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      INFLAB_DATABASE_URL: postgresql+psycopg://inflab:inflab@127.0.0.1:5432/inflab_test
+      INFLAB_REDIS_URL: redis://127.0.0.1:6379/0
+      INFLAB_S3_ENDPOINT_URL: http://127.0.0.1:9000
+      INFLAB_S3_ACCESS_KEY_ID: inflabminio
+      INFLAB_S3_SECRET_ACCESS_KEY: inflabminio
+      INFLAB_TEST_MODE: e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Start MinIO artifact store
+        shell: bash
+        run: |
+          docker run -d \
+            --name inflab-minio \
+            -p 9000:9000 \
+            -p 9001:9001 \
+            -e MINIO_ROOT_USER=inflabminio \
+            -e MINIO_ROOT_PASSWORD=inflabminio \
+            minio/minio:latest server /data --console-address ":9001"
+
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs inflab-minio
+          exit 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        working-directory: backend
+        run: uv python install
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run migrations
+        working-directory: backend
+        run: uv run alembic upgrade head
+
+      - name: Run backend static checks
+        working-directory: backend
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Run fake executor E2E
+        working-directory: backend
+        run: uv run pytest ../tests/e2e/test_control_plane_fake_executor.py -m e2e
+
+      - name: Build Ubuntu target image
+        run: docker build -t inflab-ubuntu-target:ci tests/e2e/images/ubuntu-target
+
+      - name: Start Ubuntu target container
+        run: |
+          docker run -d \
+            --name inflab-ubuntu-target \
+            -p 2222:22 \
+            inflab-ubuntu-target:ci
+
+      - name: Wait for target SSH
+        run: scripts/ci/wait-for-ssh.sh 127.0.0.1 2222 60
+
+      - name: Run Ubuntu bootstrap E2E
+        working-directory: backend
+        env:
+          INFLAB_E2E_TARGET_HOST: 127.0.0.1
+          INFLAB_E2E_TARGET_PORT: "2222"
+          INFLAB_E2E_TARGET_USER: seed
+          INFLAB_E2E_TARGET_PASSWORD: seed
+        run: uv run pytest ../tests/e2e/test_bootstrap_ubuntu_target.py -m e2e_ssh
+
+      - name: Collect Docker diagnostics
+        if: failure()
+        run: |
+          mkdir -p artifacts/e2e
+          docker ps -a > artifacts/e2e/docker-ps.txt
+          docker inspect inflab-ubuntu-target > artifacts/e2e/target-inspect.json || true
+          docker logs inflab-ubuntu-target > artifacts/e2e/target.log 2>&1 || true
+          docker logs inflab-minio > artifacts/e2e/minio.log 2>&1 || true
+
+      - name: Upload E2E artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-e2e-artifacts
+          path: artifacts/e2e

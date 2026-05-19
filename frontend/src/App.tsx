@@ -1,4 +1,4 @@
-import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import {
   Activity,
   BarChart3,
@@ -11,7 +11,7 @@ import {
   Server,
   TerminalSquare
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ElementType, ReactNode } from "react";
 
@@ -225,6 +225,7 @@ function ExperimentsView({ machines, experiments }: { machines: Machine[]; exper
 }
 
 function MetricsChart({ metrics }: { metrics: MetricsSummary[] }) {
+  const chartRef = useRef<HTMLDivElement | null>(null);
   const option = useMemo(
     () => ({
       grid: { left: 44, right: 20, top: 24, bottom: 36 },
@@ -242,7 +243,20 @@ function MetricsChart({ metrics }: { metrics: MetricsSummary[] }) {
     }),
     [metrics]
   );
-  return <ReactECharts option={option} className="chart" />;
+  useEffect(() => {
+    if (!chartRef.current) {
+      return;
+    }
+    const chart = echarts.init(chartRef.current);
+    chart.setOption(option);
+    const resize = () => chart.resize();
+    window.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      chart.dispose();
+    };
+  }, [option]);
+  return <div ref={chartRef} className="chart" />;
 }
 
 function RunsView({ experiment, metrics }: { experiment?: Experiment; metrics: MetricsSummary[] }) {

@@ -597,3 +597,12 @@ InferenceLab/
   https://docs.astral.sh/uv/  
   https://docs.astral.sh/ruff/  
   https://docs.pytest.org/en/stable/
+
+## 22. 当前 MVP 实现偏差记录
+
+本轮实现按任务要求交付完整可演示 MVP，但明确绕过真实 Phase 9 E2E。
+
+- 后端默认测试使用 SQLite in-memory schema 和 fake queue，不要求本地 PostgreSQL、Redis、MinIO 正在运行；PostgreSQL 仍是目标部署数据库，Alembic migration 已保留。
+- AsyncSSH、rsync、NFS、MinIO、HuggingFace、ModelScope、PDF、DOCX 均提供接口层或 dry-run/stub 行为，不执行真实外部连接、下载或系统修改。
+- B1-B7 bootstrap 记录完整 detect/apply/verify step result，但默认使用 fake executor/dry-run，避免污染真实机器。
+- 前端在真实 GitHub Actions E2E 未启用前创建，是本轮用户明确要求的例外；后续恢复正常流程时，应先补齐 Phase 9 E2E 再继续扩展前端。

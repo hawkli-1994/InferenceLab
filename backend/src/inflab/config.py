@@ -13,6 +13,7 @@ class DatabaseSettings(BaseSettings):
     url: str = "postgresql+psycopg://inflab:inflab@127.0.0.1:5432/inflab"
     pool_size: int = 5
     pool_timeout_seconds: int = 30
+    create_schema_on_startup: bool = False
 
 
 class RedisSettings(BaseSettings):
@@ -55,6 +56,7 @@ class AppSettings(BaseSettings):
     app_name: str = Field(default="InferenceLab API", validation_alias="INFLAB_APP_NAME")
     environment: str = Field(default="local", validation_alias="INFLAB_ENVIRONMENT")
     log_level: str = Field(default="INFO", validation_alias="INFLAB_LOG_LEVEL")
+    secret_key: SecretStr = Field(default=SecretStr("inference-lab-dev-key"))
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     object_storage: ObjectStorageSettings = Field(default_factory=ObjectStorageSettings)

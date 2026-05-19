@@ -17,13 +17,21 @@ The product philosophy is intentionally pragmatic: this is an internal workshop-
 
 ## Current Implementation State
 
-The repository currently contains requirements, technical selection docs, and agent harness files. Application code should follow the structure proposed in `modelbench_agent_tech_selection.md` unless a later committed architecture document supersedes it.
+The repository contains an MVP implementation with:
+
+- `backend/`: FastAPI control plane, SQLAlchemy 2 models, Alembic migration, fake queue, fake executor, dry-run bootstrap, plugin registry, benchmark/tuning/report flows, and API contract tests.
+- `frontend/`: React + Vite + TypeScript workbench UI with a typed API client and mock-data fallback.
+- `deploy/compose.yaml`: PostgreSQL, Redis, and MinIO dependencies.
+
+Application code should follow the structure proposed in `modelbench_agent_tech_selection.md` unless a later committed architecture document supersedes it.
 
 Primary execution checklist:
 
 - `docs/task_list.md`
 
-Follow the task list order strictly: complete all backend APIs and backend implementation first, pass the backend acceptance gate, then start frontend work. Do not build backend and frontend in parallel.
+Follow the task list order strictly by default: complete all backend APIs and backend implementation first, pass the backend acceptance gate, then start frontend work. Do not build backend and frontend in parallel.
+
+Current exception: the present MVP intentionally bypasses the real Phase 9 E2E gate by explicit task direction. Do not submit `tests/e2e/backend_e2e_enabled` or enable true E2E unless a later user request explicitly asks for it.
 
 Expected top-level structure as implementation begins:
 
@@ -71,12 +79,12 @@ Preserve these constraints in code and docs:
 - PostgreSQL stores queryable facts and summaries; large logs, raw metrics, reports, and snapshots live in object storage with database references.
 - Default tests must not require real SSH machines, GPUs, NAS, Docker daemon mutation, or external LLM calls.
 - Integration tests that touch real machines or external services must be opt-in and clearly marked.
-- Backend Phase 9 must pass the GitHub Actions E2E gate described in `docs/e2e_acceptance.md` before frontend work starts.
+- Backend Phase 9 must pass the GitHub Actions E2E gate described in `docs/e2e_acceptance.md` before frontend work starts, unless a task explicitly directs an E2E bypass. The current MVP is such a bypass and should be treated as lower confidence than a true Phase 9 pass.
 
 ## Coding Rules
 
 - Keep implementation close to the documented MVP. Avoid broad framework introductions and speculative abstractions.
-- Respect the backend-first sequence in `docs/task_list.md`. Do not create `frontend/` or add frontend dependencies until the backend acceptance gate is complete.
+- Respect the backend-first sequence in `docs/task_list.md`. Do not create `frontend/` or add frontend dependencies until backend checks pass, and do not bypass the Phase 9 E2E gate unless explicitly instructed.
 - Use Pydantic models for external API payloads, plugin specs, benchmark results, and LLM structured outputs.
 - Keep shell commands in remote executor modules, not scattered across API handlers or workers.
 - Prefer structured parsers or typed models over ad hoc string handling when outputs are important for reports.

@@ -5,8 +5,15 @@ description = "InferenceLab / ModelBench Agent backend control plane"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.14.0,<2.0",
+    "cryptography>=44.0.0,<47.0",
     "fastapi>=0.115.0,<1.0",
+    "jinja2>=3.1.0,<4.0",
     "pydantic-settings>=2.7.0,<3.0",
+    "psycopg[binary]>=3.2.0,<4.0",
+    "redis>=5.2.0,<7.0",
+    "rq>=2.0.0,<3.0",
+    "sqlalchemy>=2.0.0,<3.0",
     "uvicorn[standard]>=0.34.0,<1.0",
 ]
 
@@ -36,6 +43,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "N", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/inflab/api/v1.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

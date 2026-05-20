@@ -3,7 +3,9 @@
 面向 AI 整机厂商的自动化模型推理测试、调优与报告平台。
 
 当前仓库包含一个 workshop-grade MVP 实现：FastAPI 后端、SQLAlchemy/Alembic
-数据模型、fake executor / fake plugin 业务闭环，以及 React + Vite 工作台前端。
+数据模型、fake executor / fake plugin 业务闭环、数据库 demo seed，以及 React + Vite
+工作台前端。
+当前继续按任务要求绕过真实 E2E/CI gate，优先推进本地 fake-backed 功能闭环。
 
 核心文档：
 
@@ -48,6 +50,16 @@ cd backend
 uv run uvicorn inflab.api.app:app --reload
 ```
 
+使用数据库 demo 数据启动后端：
+
+```bash
+cd backend
+INFLAB_DATABASE_URL=sqlite+pysqlite:////tmp/inflab-demo.db \
+INFLAB_DATABASE_CREATE_SCHEMA_ON_STARTUP=true \
+INFLAB_SEED_DEMO_DATA=true \
+uv run uvicorn inflab.api.app:app --reload
+```
+
 前端工作台：
 
 ```bash
@@ -56,6 +68,20 @@ pnpm install
 pnpm dev
 pnpm build
 ```
+
+当前前端只调用后端 API，不再导入本地 mock 数据。可直接操作数据库记录：新增机器、
+机器探测、dry-run bootstrap、注册 demo 模型、预览调参候选、创建实验、查看
+trial/log/metrics，并生成报告 artifact 记录。空库可在页面点击 `Seed DB`，或调用
+`POST /api/v1/dev/seed-demo-data`。
+如果后端不在默认 `http://127.0.0.1:8000`，可用 `VITE_API_BASE` 指向目标 API：
+
+```bash
+VITE_API_BASE=http://127.0.0.1:18000/api/v1 pnpm dev -- --port 5174
+```
+
+真实推理仍不默认执行，但后端已有 vLLM benchmark command-plan 接口：
+`POST /api/v1/benchmarks/plan`。它生成 `vllm bench serve` / `vllm bench throughput`
+命令和结果路径，供后续接入真实远程执行器。
 
 ## E2E Status
 

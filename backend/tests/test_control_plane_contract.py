@@ -50,12 +50,43 @@ def test_openapi_schema_exposes_mvp_routes(client: TestClient) -> None:
         "/api/v1/machines/{machine_id}/probe",
         "/api/v1/machines/{machine_id}/bootstrap",
         "/api/v1/models",
+        "/api/v1/benchmarks/plan",
         "/api/v1/benchmarks/jobs",
+        "/api/v1/dev/seed-demo-data",
+        "/api/v1/experiments/plan",
         "/api/v1/experiments",
+        "/api/v1/experiments/{experiment_id}/run-log",
         "/api/v1/experiments/{experiment_id}/reports",
+        "/api/v1/reports",
         "/api/v1/plugins",
     }
     assert expected_paths.issubset(paths)
+
+
+def test_demo_seed_populates_database_backed_workbench_data(client: TestClient) -> None:
+    seed_response = client.post("/api/v1/dev/seed-demo-data")
+
+    assert seed_response.status_code == 200
+    seeded = seed_response.json()
+    assert seeded["machines"] >= 1
+    assert seeded["models"] >= 1
+    assert seeded["experiments"] >= 2
+    assert seeded["reports"] >= 2
+
+    machines_response = client.get("/api/v1/machines")
+    assert machines_response.status_code == 200
+    assert machines_response.json()["items"][0]["name"] == "demo-a100-01"
+
+    experiments_response = client.get("/api/v1/experiments")
+    assert experiments_response.status_code == 200
+    assert {experiment["runtime_mode"] for experiment in experiments_response.json()} >= {
+        "container",
+        "bare_metal",
+    }
+
+    reports_response = client.get("/api/v1/reports")
+    assert reports_response.status_code == 200
+    assert all(report["artifact_id"] for report in reports_response.json())
 
 
 def test_fake_control_plane_business_loop(client: TestClient) -> None:
@@ -96,6 +127,26 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     assert benchmark["status"] == "succeeded"
     assert benchmark["result"]["metrics"]["tokens_per_second"] > 0
 
+    benchmark_plan_response = client.post(
+        "/api/v1/benchmarks/plan",
+        json={"run_spec": run_spec, "kind": "serve", "num_prompts": 16},
+    )
+    assert benchmark_plan_response.status_code == 200
+    benchmark_plan = benchmark_plan_response.json()
+    assert "vllm bench serve" in benchmark_plan["bench_command"]
+    assert "--save-result" in benchmark_plan["bench_command"]
+    assert benchmark_plan["serve_command"]
+
+    plan_response = client.post(
+        "/api/v1/experiments/plan",
+        json={"run_spec": run_spec, "budget": {"max_trials": 3}},
+    )
+    assert plan_response.status_code == 200
+    plan = plan_response.json()
+    assert plan["phases"][:3] == ["Observe", "Plan", "Validate"]
+    assert plan["trial_count"] == 3
+    assert "vllm serve" in plan["candidates"][0]["launch_command"]
+
     experiment_response = client.post(
         "/api/v1/experiments",
         json={"name": "container baseline", "run_spec": run_spec, "budget": {"max_trials": 2}},
@@ -109,14 +160,26 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     assert reproducibility["framework_params"]["tensor_parallel_size"] == 4
     assert reproducibility["prompt_dataset"] == "mock_prompts_v1"
     assert "vllm serve" in reproducibility["launch_command"]
+    assert reproducibility["candidate_count"] == 2
+    assert reproducibility["job_id"]
 
     trials_response = client.get(f"/api/v1/experiments/{experiment['id']}/trials")
     assert trials_response.status_code == 200
-    assert len(trials_response.json()) == 2
+    trials = trials_response.json()
+    assert len(trials) == 2
+    assert trials[0]["result"]["logs"][0] == "trial 1 started"
 
     metrics_response = client.get(f"/api/v1/experiments/{experiment['id']}/metrics")
     assert metrics_response.status_code == 200
     assert len(metrics_response.json()) == 2
+
+    run_log_response = client.get(f"/api/v1/experiments/{experiment['id']}/run-log")
+    assert run_log_response.status_code == 200
+    assert any("tokens_per_second" in line for line in run_log_response.json()["lines"])
+
+    jobs_response = client.get("/api/v1/jobs")
+    assert jobs_response.status_code == 200
+    assert any(job["job_type"] == "experiment" for job in jobs_response.json())
 
     report_response = client.post(
         f"/api/v1/experiments/{experiment['id']}/reports",
@@ -127,6 +190,10 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     assert report["status"] == "succeeded"
     assert "Performance Report" in report["markdown"]
     assert "do-not-return" not in report["markdown"]
+
+    reports_response = client.get(f"/api/v1/reports?experiment_id={experiment['id']}")
+    assert reports_response.status_code == 200
+    assert reports_response.json()[0]["id"] == report["id"]
 
     artifact_response = client.get("/api/v1/artifacts")
     assert artifact_response.status_code == 200

@@ -57,6 +57,7 @@ class AppSettings(BaseSettings):
     environment: str = Field(default="local", validation_alias="INFLAB_ENVIRONMENT")
     log_level: str = Field(default="INFO", validation_alias="INFLAB_LOG_LEVEL")
     secret_key: SecretStr = Field(default=SecretStr("inference-lab-dev-key"))
+    seed_demo_data: bool = Field(default=False, validation_alias="INFLAB_SEED_DEMO_DATA")
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     object_storage: ObjectStorageSettings = Field(default_factory=ObjectStorageSettings)

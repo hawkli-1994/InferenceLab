@@ -43,6 +43,74 @@ export interface ModelRecord {
   created_at: string;
 }
 
+export interface ModelCreatePayload {
+  name: string;
+  source: "mock" | "rsync" | "nfs" | "minio" | "huggingface" | "modelscope";
+  format: string;
+  cache_path: string;
+  sha256?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MachineCreatePayload {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  runtime_mode: RuntimeMode;
+  credential?: {
+    credential_type: "password" | "private_key";
+    secret: string;
+  };
+}
+
+export interface FrameworkParams {
+  tensor_parallel_size?: number;
+  pipeline_parallel_size?: number;
+  gpu_memory_utilization?: number;
+  max_model_len?: number;
+  max_num_seqs?: number;
+  max_num_batched_tokens?: number;
+  dtype?: string;
+  quantization?: string | null;
+  enable_chunked_prefill?: boolean;
+  enable_prefix_caching?: boolean;
+}
+
+export interface RunSpec {
+  machine_id: string;
+  model_id: string;
+  runtime_mode: Exclude<RuntimeMode, "both">;
+  framework: "vllm" | "sglang";
+  framework_version?: string;
+  framework_params?: FrameworkParams;
+  prompt_dataset?: string;
+  benchmark_version?: string;
+}
+
+export interface ExperimentCreatePayload {
+  name: string;
+  run_spec: RunSpec;
+  goal: string;
+  budget: {
+    max_trials: number;
+  };
+}
+
+export interface ExperimentCandidate {
+  trial_index: number;
+  params: Record<string, unknown>;
+  launch_command: string;
+  validation: string;
+}
+
+export interface ExperimentPlan {
+  phases: string[];
+  candidates: ExperimentCandidate[];
+  trial_count: number;
+  notes: string[];
+}
+
 export interface Experiment {
   id: string;
   name: string;
@@ -71,6 +139,11 @@ export interface Trial {
   result: Record<string, unknown>;
   failure_category: string | null;
   created_at: string;
+}
+
+export interface ExperimentRunLog {
+  experiment_id: string;
+  lines: string[];
 }
 
 export interface MetricsSummary {

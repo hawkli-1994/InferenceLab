@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import re
+import shlex
+from typing import Any
+
 from inflab.plugins import registry
-from inflab.schemas import BenchmarkResult, RunSpec
+from inflab.schemas import (
+    BenchmarkCommandPlan,
+    BenchmarkKind,
+    BenchmarkPlanCreate,
+    BenchmarkResult,
+    RunSpec,
+)
 
 
 def build_launch_command(spec: RunSpec) -> str:
@@ -28,6 +39,105 @@ def fake_benchmark_result(spec: RunSpec) -> BenchmarkResult:
         power={"avg_watt": 2150, "peak_watt": 2380},
         failures=[],
     )
+
+
+def build_benchmark_command_plan(
+    payload: BenchmarkPlanCreate,
+    *,
+    model_path: str,
+) -> BenchmarkCommandPlan:
+    if payload.run_spec.framework != "vllm":
+        raise ValueError("real benchmark command planning is currently implemented for vllm")
+
+    result_path = f"{payload.result_dir.rstrip('/')}/{payload.result_filename}"
+    serve_command = build_launch_command(payload.run_spec)
+    quoted_model = shlex.quote(model_path)
+    common = [
+        "vllm",
+        "bench",
+        payload.kind.value,
+        "--model",
+        quoted_model,
+        "--dataset-name",
+        shlex.quote(payload.dataset_name),
+        "--num-prompts",
+        str(payload.num_prompts),
+    ]
+    notes = [
+        "command plan only; API does not execute real inference by default",
+        "requires vLLM installed with bench extras on the target runtime",
+    ]
+
+    if payload.kind == BenchmarkKind.serve:
+        command_parts = [
+            *common,
+            "--backend",
+            "vllm",
+            "--host",
+            shlex.quote(payload.host),
+            "--port",
+            str(payload.port),
+            "--random-input-len",
+            str(payload.input_len),
+            "--random-output-len",
+            str(payload.output_len),
+            "--save-result",
+            "--result-dir",
+            shlex.quote(payload.result_dir),
+            "--result-filename",
+            shlex.quote(payload.result_filename),
+        ]
+        if payload.request_rate is not None:
+            command_parts.extend(["--request-rate", str(payload.request_rate)])
+    else:
+        command_parts = [
+            *common,
+            "--input-len",
+            str(payload.input_len),
+            "--output-len",
+            str(payload.output_len),
+            "--output-json",
+            shlex.quote(result_path),
+        ]
+
+    return BenchmarkCommandPlan(
+        framework="vllm",
+        kind=payload.kind,
+        serve_command=serve_command if payload.kind == BenchmarkKind.serve else None,
+        bench_command=" ".join(command_parts),
+        result_path=result_path,
+        parser="parse_vllm_bench_output",
+        notes=notes,
+    )
+
+
+def parse_vllm_bench_output(raw: str) -> dict[str, Any]:
+    """Parse vLLM bench JSON files or text logs into normalized raw facts."""
+
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    facts: dict[str, Any] = {}
+    patterns = {
+        "request_throughput": r"Request throughput.*?:\s*([0-9.]+)",
+        "output_throughput": r"Output token throughput.*?:\s*([0-9.]+)",
+        "total_token_throughput": r"Total token throughput.*?:\s*([0-9.]+)",
+        "mean_ttft_ms": r"Mean TTFT.*?:\s*([0-9.]+)",
+        "median_ttft_ms": r"Median TTFT.*?:\s*([0-9.]+)",
+        "p99_ttft_ms": r"P99 TTFT.*?:\s*([0-9.]+)",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, raw, re.IGNORECASE)
+        if match:
+            facts[key] = float(match.group(1))
+    return facts
 
 
 def normalize_metrics(result: BenchmarkResult) -> dict[str, float]:

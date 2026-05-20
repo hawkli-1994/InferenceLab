@@ -159,6 +159,23 @@
 - [x] 实现报告生成和下载。
 - [x] 实现前端测试、lint、build（本轮未配置 test/lint，`pnpm build` 通过）。
 
+## Forward Development While E2E/CI Is Bypassed
+
+继续按用户要求绕过真实 E2E 和 CI gate；本节只记录不依赖真实 SSH/GPU/Docker mutation 的功能推进。
+
+- [x] 新增实验候选预览 API：`POST /api/v1/experiments/plan`。
+- [x] 新增 vLLM benchmark command-plan API：`POST /api/v1/benchmarks/plan`，只生成 `vllm bench` 命令，不执行真实推理。
+- [x] 创建实验时记录 Agent phase、candidate count、experiment job、trial 日志。
+- [x] 新增实验运行日志聚合 API：`GET /api/v1/experiments/{experiment_id}/run-log`。
+- [x] 新增报告列表 API：`GET /api/v1/reports`，支持按 `experiment_id` 过滤。
+- [x] 新增数据库 demo seed：`POST /api/v1/dev/seed-demo-data` 和 `INFLAB_SEED_DEMO_DATA=true`。
+- [x] 前端机器表单接入真实新增机器、探测 API。
+- [x] 前端 Bootstrap 页面接入 dry-run 执行和结构化 step 输出。
+- [x] 前端实验创建页接入数据库模型注册、候选预览、实验创建。
+- [x] 前端 Run 页面展示真实 trial、run-log、metrics。
+- [x] 前端 Report 页面读取真实报告列表并触发生成。
+- [x] 删除前端本地 mock fallback；前端只通过后端 API 读取数据库数据。
+
 ## Working Rule
 
 - 默认阶段顺序仍是先后端、后前端。

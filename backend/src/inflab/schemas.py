@@ -31,6 +31,11 @@ class BootstrapProfile(StrEnum):
     custom = "custom"
 
 
+class BenchmarkKind(StrEnum):
+    serve = "serve"
+    throughput = "throughput"
+
+
 class StepStatus(StrEnum):
     skipped = "skipped"
     unchanged = "unchanged"
@@ -248,6 +253,30 @@ class BenchmarkJobCreate(BaseModel):
     run_spec: RunSpec
 
 
+class BenchmarkPlanCreate(BaseModel):
+    run_spec: RunSpec
+    kind: BenchmarkKind = BenchmarkKind.serve
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, ge=1, le=65535)
+    dataset_name: str = "random"
+    input_len: int = Field(default=1024, ge=1)
+    output_len: int = Field(default=256, ge=1)
+    num_prompts: int = Field(default=128, ge=1)
+    request_rate: float | None = Field(default=None, gt=0)
+    result_dir: str = "/data/logs/inflab-bench"
+    result_filename: str = "vllm-bench-result.json"
+
+
+class BenchmarkCommandPlan(BaseModel):
+    framework: str
+    kind: BenchmarkKind
+    serve_command: str | None
+    bench_command: str
+    result_path: str
+    parser: str
+    notes: list[str]
+
+
 class JobRead(BaseModel):
     id: str
     job_type: str
@@ -265,6 +294,25 @@ class ExperimentCreate(BaseModel):
     run_spec: RunSpec
     goal: str = "max_throughput"
     budget: dict[str, Any] = Field(default_factory=lambda: {"max_trials": 2})
+
+
+class ExperimentPlanRequest(BaseModel):
+    run_spec: RunSpec
+    budget: dict[str, Any] = Field(default_factory=lambda: {"max_trials": 2})
+
+
+class ExperimentCandidateRead(BaseModel):
+    trial_index: int
+    params: dict[str, Any]
+    launch_command: str
+    validation: str
+
+
+class ExperimentPlanRead(BaseModel):
+    phases: list[str]
+    candidates: list[ExperimentCandidateRead]
+    trial_count: int
+    notes: list[str]
 
 
 class ExperimentRead(BaseModel):
@@ -308,6 +356,11 @@ class MetricsSummaryRead(BaseModel):
     requests_per_second: float
     failure_rate: float
     metrics: dict[str, Any]
+
+
+class ExperimentRunLogRead(BaseModel):
+    experiment_id: str
+    lines: list[str]
 
 
 class ReportCreate(BaseModel):

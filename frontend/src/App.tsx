@@ -4,10 +4,14 @@ import {
   BarChart3,
   Boxes,
   ClipboardList,
+  Database,
   FileText,
   GitCompare,
   HardDrive,
+  Play,
   Plus,
+  RotateCw,
+  Search,
   Server,
   TerminalSquare
 } from "lucide-react";
@@ -16,7 +20,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ElementType, ReactNode } from "react";
 
 import { api } from "./api";
-import type { Experiment, Machine, MetricsSummary } from "./types";
+import type {
+  BootstrapRun,
+  Experiment,
+  ExperimentCreatePayload,
+  ExperimentPlan,
+  ExperimentRunLog,
+  Machine,
+  MetricsSummary,
+  ModelRecord,
+  RuntimeMode,
+  Trial
+} from "./types";
 
 type View = "machines" | "bootstrap" | "experiments" | "runs" | "compare" | "history" | "reports";
 
@@ -29,6 +44,11 @@ const navItems: Array<{ id: View; label: string; icon: ElementType }> = [
   { id: "history", label: "History", icon: ClipboardList },
   { id: "reports", label: "Reports", icon: FileText }
 ];
+
+function numberValue(value: FormDataEntryValue | null, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 function StatusPill({ status }: { status: string }) {
   return <span className={`status status-${status}`}>{status}</span>;
@@ -76,6 +96,37 @@ function Shell({
 }
 
 function MachinesView({ machines }: { machines: Machine[] }) {
+  const queryClient = useQueryClient();
+  const createMachine = useMutation({
+    mutationFn: (formData: FormData) =>
+      api.createMachine({
+        name: String(formData.get("name") ?? "lab-a100-02"),
+        host: String(formData.get("host") ?? "10.0.0.11"),
+        port: numberValue(formData.get("port"), 22),
+        username: String(formData.get("username") ?? "seed"),
+        runtime_mode: String(formData.get("runtime_mode") ?? "both") as RuntimeMode,
+        credential: {
+          credential_type: "password",
+          secret: String(formData.get("secret") ?? "seed")
+        }
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["machines"] })
+  });
+  const probeMachine = useMutation({
+    mutationFn: (machineId: string) => api.probeMachine(machineId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["machines"] })
+  });
+  const seedDemoData = useMutation({
+    mutationFn: api.seedDemoData,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["machines"] });
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+      queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+    }
+  });
+
   return (
     <section className="stack">
       <header className="page-head">
@@ -83,32 +134,50 @@ function MachinesView({ machines }: { machines: Machine[] }) {
           <h1>Machine Pool</h1>
           <p>SSH onboarding records, machine profiles, and current readiness.</p>
         </div>
-        <button className="primary">
-          <Plus size={16} /> Add Machine
+        <button className="secondary" onClick={() => seedDemoData.mutate()} disabled={seedDemoData.isPending}>
+          <Database size={16} /> {seedDemoData.isPending ? "Seeding" : "Seed DB"}
         </button>
       </header>
       <div className="split">
-        <form className="panel form-grid">
+        <form
+          className="panel form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createMachine.mutate(new FormData(event.currentTarget));
+          }}
+        >
           <label>
             Name
-            <input defaultValue="lab-a100-02" />
+            <input name="name" defaultValue="lab-a100-02" />
           </label>
           <label>
             Host
-            <input defaultValue="10.0.0.11" />
+            <input name="host" defaultValue="10.0.0.11" />
           </label>
           <label>
             User
-            <input defaultValue="seed" />
+            <input name="username" defaultValue="seed" />
+          </label>
+          <label>
+            Port
+            <input name="port" type="number" min="1" max="65535" defaultValue="22" />
+          </label>
+          <label>
+            Password
+            <input name="secret" type="password" defaultValue="seed" />
           </label>
           <label>
             Runtime
-            <select defaultValue="both">
+            <select name="runtime_mode" defaultValue="both">
               <option value="both">container + bare metal</option>
               <option value="container">container</option>
               <option value="bare_metal">bare metal</option>
             </select>
           </label>
+          <button className="primary form-action" disabled={createMachine.isPending}>
+            <Plus size={16} /> {createMachine.isPending ? "Adding" : "Add Machine"}
+          </button>
+          <span className="form-note">{createMachine.isError ? "API request failed" : ""}</span>
         </form>
         <div className="panel table-panel">
           <table>
@@ -119,6 +188,7 @@ function MachinesView({ machines }: { machines: Machine[] }) {
                 <th>Status</th>
                 <th>Runtime</th>
                 <th>Fingerprint</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -131,6 +201,11 @@ function MachinesView({ machines }: { machines: Machine[] }) {
                   </td>
                   <td>{machine.runtime_mode}</td>
                   <td className="mono">{machine.fingerprint ?? "pending"}</td>
+                  <td>
+                    <button className="icon-button" title="Probe machine" onClick={() => probeMachine.mutate(machine.id)}>
+                      <Search size={15} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -142,6 +217,20 @@ function MachinesView({ machines }: { machines: Machine[] }) {
 }
 
 function BootstrapView({ machines }: { machines: Machine[] }) {
+  const queryClient = useQueryClient();
+  const [machineId, setMachineId] = useState("");
+  const [profile, setProfile] = useState("full");
+  const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
+  const selectedMachineId = machineId || machines[0]?.id || "";
+  const runBootstrap = useMutation({
+    mutationFn: () => api.bootstrapMachine(selectedMachineId, profile),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["machines"] });
+    }
+  });
+  const latestRun = bootstrapRuns.data?.[0] as BootstrapRun | undefined;
+
   return (
     <section className="stack">
       <header className="page-head">
@@ -163,13 +252,117 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
       </div>
       <div className="panel">
         <h2>Target</h2>
-        <p>{machines[0]?.name ?? "No machine"} · Full profile · dry-run enabled</p>
+        <div className="inline-controls">
+          <select value={selectedMachineId} onChange={(event) => setMachineId(event.target.value)}>
+            {machines.length === 0 ? (
+              <option value="">No machines</option>
+            ) : (
+              machines.map((machine) => (
+                <option value={machine.id} key={machine.id}>
+                  {machine.name}
+                </option>
+              ))
+            )}
+          </select>
+          <select value={profile} onChange={(event) => setProfile(event.target.value)}>
+            <option value="minimal">minimal</option>
+            <option value="standard_container">standard container</option>
+            <option value="standard_bare_metal">standard bare metal</option>
+            <option value="full">full</option>
+          </select>
+          <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
+            <Play size={16} /> {runBootstrap.isPending ? "Running" : "Run Dry-Run"}
+          </button>
+        </div>
+      </div>
+      <div className="panel table-panel">
+        <h2>Latest Step Output</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th>Status</th>
+              <th>Changed Files</th>
+              <th>Failure Hint</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(latestRun?.step_results ?? []).map((step) => (
+              <tr key={`${latestRun?.id}-${step.id}`}>
+                <td>{step.name}</td>
+                <td>
+                  <StatusPill status={step.status} />
+                </td>
+                <td>{step.changed_files.join(", ") || "none"}</td>
+                <td>{step.failure_hint ?? "none"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   );
 }
 
-function ExperimentsView({ machines, experiments }: { machines: Machine[]; experiments: Experiment[] }) {
+function ExperimentsView({
+  machines,
+  models,
+  experiments
+}: {
+  machines: Machine[];
+  models: ModelRecord[];
+  experiments: Experiment[];
+}) {
+  const queryClient = useQueryClient();
+  const [plan, setPlan] = useState<ExperimentPlan | null>(null);
+  const [selectedMachineId, setSelectedMachineId] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const machineId = selectedMachineId || machines[0]?.id || "";
+  const modelId = selectedModelId || models[0]?.id || "";
+  const createModel = useMutation({
+    mutationFn: (formData: FormData) =>
+      api.createModel({
+        name: String(formData.get("model_name") ?? "Qwen3-32B"),
+        source: "mock",
+        format: "safetensors",
+        cache_path: String(formData.get("cache_path") ?? "/data/models/qwen3-32b"),
+        metadata: { owner: "workbench" }
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["models"] })
+  });
+  const planExperiment = useMutation({
+    mutationFn: (payload: ExperimentCreatePayload) => api.planExperiment(payload),
+    onSuccess: setPlan
+  });
+  const createExperiment = useMutation({
+    mutationFn: (payload: ExperimentCreatePayload) => api.createExperiment(payload),
+    onSuccess: (experiment) => {
+      queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      queryClient.invalidateQueries({ queryKey: ["metrics", experiment.id] });
+      queryClient.invalidateQueries({ queryKey: ["trials", experiment.id] });
+      queryClient.invalidateQueries({ queryKey: ["run-log", experiment.id] });
+    }
+  });
+  const buildPayload = (formData: FormData): ExperimentCreatePayload => ({
+    name: String(formData.get("name") ?? "container baseline"),
+    goal: String(formData.get("goal") ?? "max_throughput"),
+    budget: { max_trials: numberValue(formData.get("max_trials"), 2) },
+    run_spec: {
+      machine_id: String(formData.get("machine_id") ?? machineId),
+      model_id: String(formData.get("model_id") ?? modelId),
+      runtime_mode: String(formData.get("runtime_mode") ?? "container") as "container" | "bare_metal",
+      framework: String(formData.get("framework") ?? "vllm") as "vllm" | "sglang",
+      framework_version: String(formData.get("framework_version") ?? "0.9.0-mock"),
+      prompt_dataset: String(formData.get("prompt_dataset") ?? "mock_prompts_v1"),
+      benchmark_version: "inflab-bench-mock-v1",
+      framework_params: {
+        tensor_parallel_size: numberValue(formData.get("tensor_parallel_size"), 1),
+        gpu_memory_utilization: numberValue(formData.get("gpu_memory_utilization"), 0.88),
+        max_num_seqs: numberValue(formData.get("max_num_seqs"), 128)
+      }
+    }
+  });
+
   return (
     <section className="stack">
       <header className="page-head">
@@ -177,47 +370,161 @@ function ExperimentsView({ machines, experiments }: { machines: Machine[]; exper
           <h1>Create Experiment</h1>
           <p>Build a reproducible RunSpec before launching trials.</p>
         </div>
-        <button className="primary">
-          <TerminalSquare size={16} /> Create
-        </button>
       </header>
       <div className="split">
-        <form className="panel form-grid">
+        <form
+          className="panel form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createModel.mutate(new FormData(event.currentTarget));
+          }}
+        >
+          <label>
+            Model
+            <input name="model_name" defaultValue="Qwen3-32B" />
+          </label>
+          <label>
+            Cache Path
+            <input name="cache_path" defaultValue="/data/models/qwen3-32b" />
+          </label>
+          <button className="primary form-action" disabled={createModel.isPending}>
+            <Database size={16} /> {createModel.isPending ? "Registering" : "Register Model"}
+          </button>
+          <span className="form-note">{models.length} models registered</span>
+        </form>
+        <form
+          className="panel form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createExperiment.mutate(buildPayload(new FormData(event.currentTarget)));
+          }}
+        >
+          <label>
+            Name
+            <input name="name" defaultValue="container baseline" />
+          </label>
           <label>
             Machine
-            <select defaultValue={machines[0]?.id}>
-              {machines.map((machine) => (
-                <option value={machine.id} key={machine.id}>
-                  {machine.name}
-                </option>
-              ))}
+            <select name="machine_id" value={machineId} onChange={(event) => setSelectedMachineId(event.target.value)}>
+              {machines.length === 0 ? (
+                <option value="">No machines</option>
+              ) : (
+                machines.map((machine) => (
+                  <option value={machine.id} key={machine.id}>
+                    {machine.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label>
+            Model
+            <select name="model_id" value={modelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+              {models.length === 0 ? (
+                <option value="">No models</option>
+              ) : (
+                models.map((model) => (
+                  <option value={model.id} key={model.id}>
+                    {model.name}
+                  </option>
+                ))
+              )}
             </select>
           </label>
           <label>
             Framework
-            <select defaultValue="vllm">
+            <select name="framework" defaultValue="vllm">
               <option value="vllm">vLLM</option>
               <option value="sglang">SGLang</option>
             </select>
           </label>
           <label>
             Runtime
-            <select defaultValue="container">
+            <select name="runtime_mode" defaultValue="container">
               <option value="container">container</option>
               <option value="bare_metal">bare metal</option>
             </select>
           </label>
           <label>
             Goal
-            <select defaultValue="max_throughput">
+            <select name="goal" defaultValue="max_throughput">
               <option value="max_throughput">maximum throughput</option>
               <option value="lowest_p99">lowest P99 latency</option>
             </select>
           </label>
+          <label>
+            Framework Version
+            <input name="framework_version" defaultValue="0.9.0-mock" />
+          </label>
+          <label>
+            Prompt Dataset
+            <input name="prompt_dataset" defaultValue="mock_prompts_v1" />
+          </label>
+          <label>
+            Tensor Parallel
+            <input name="tensor_parallel_size" type="number" min="1" defaultValue="4" />
+          </label>
+          <label>
+            GPU Memory
+            <input name="gpu_memory_utilization" type="number" min="0.1" max="1" step="0.01" defaultValue="0.88" />
+          </label>
+          <label>
+            Max Seqs
+            <input name="max_num_seqs" type="number" min="1" defaultValue="128" />
+          </label>
+          <label>
+            Max Trials
+            <input name="max_trials" type="number" min="1" max="8" defaultValue="2" />
+          </label>
+          <div className="form-actions">
+            <button
+              className="secondary"
+              type="button"
+              disabled={!machineId || !modelId || planExperiment.isPending}
+              onClick={(event) => {
+                const form = event.currentTarget.form;
+                if (form) {
+                  planExperiment.mutate(buildPayload(new FormData(form)));
+                }
+              }}
+            >
+              <RotateCw size={16} /> {planExperiment.isPending ? "Planning" : "Preview"}
+            </button>
+            <button className="primary" disabled={!machineId || !modelId || createExperiment.isPending}>
+              <TerminalSquare size={16} /> {createExperiment.isPending ? "Creating" : "Create"}
+            </button>
+          </div>
         </form>
+      </div>
+      <div className="split">
         <div className="panel">
-          <h2>Latest RunSpec</h2>
-          <pre>{JSON.stringify(experiments[0]?.reproducibility ?? {}, null, 2)}</pre>
+          <h2>Candidate Preview</h2>
+          <pre>{JSON.stringify(plan ?? experiments[0]?.reproducibility ?? {}, null, 2)}</pre>
+        </div>
+        <div className="panel table-panel">
+          <h2>Recent Experiments</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Runtime</th>
+                <th>Status</th>
+                <th>Candidates</th>
+              </tr>
+            </thead>
+            <tbody>
+              {experiments.slice(0, 5).map((experiment) => (
+                <tr key={experiment.id}>
+                  <td>{experiment.name}</td>
+                  <td>{experiment.runtime_mode}</td>
+                  <td>
+                    <StatusPill status={experiment.status} />
+                  </td>
+                  <td>{String(experiment.reproducibility.candidate_count ?? "n/a")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -259,7 +566,17 @@ function MetricsChart({ metrics }: { metrics: MetricsSummary[] }) {
   return <div ref={chartRef} className="chart" />;
 }
 
-function RunsView({ experiment, metrics }: { experiment?: Experiment; metrics: MetricsSummary[] }) {
+function RunsView({
+  experiment,
+  metrics,
+  trials,
+  runLog
+}: {
+  experiment?: Experiment;
+  metrics: MetricsSummary[];
+  trials: Trial[];
+  runLog?: ExperimentRunLog;
+}) {
   return (
     <section className="stack">
       <header className="page-head">
@@ -276,8 +593,33 @@ function RunsView({ experiment, metrics }: { experiment?: Experiment; metrics: M
         </div>
         <div className="panel">
           <h2>Logs</h2>
-          <pre>job started{"\n"}trial 1 succeeded{"\n"}trial 2 succeeded{"\n"}report artifact ready</pre>
+          <pre>{(runLog?.lines ?? ["No experiment selected"]).join("\n")}</pre>
         </div>
+      </div>
+      <div className="panel table-panel">
+        <h2>Trials</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Params</th>
+              <th>Command</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trials.map((trial) => (
+              <tr key={trial.id}>
+                <td>{trial.trial_index}</td>
+                <td>
+                  <StatusPill status={trial.status} />
+                </td>
+                <td className="mono">{JSON.stringify(trial.params)}</td>
+                <td className="mono">{trial.launch_command}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <div className="panel">
         <h2>Launch Command</h2>
@@ -355,9 +697,12 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
   const queryClient = useQueryClient();
   const reportMutation = useMutation({
     mutationFn: () => api.generateReport(experiment?.id ?? "experiment-container"),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reports"] })
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reports", experiment?.id] })
   });
-  const reports = useQuery({ queryKey: ["reports"], queryFn: api.reports });
+  const reports = useQuery({
+    queryKey: ["reports", experiment?.id],
+    queryFn: () => api.reports(experiment?.id)
+  });
 
   return (
     <section className="stack">
@@ -366,7 +711,7 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
           <h1>Reports</h1>
           <p>Markdown source with PDF/DOCX artifact interfaces.</p>
         </div>
-        <button className="primary" onClick={() => reportMutation.mutate()}>
+        <button className="primary" disabled={!experiment || reportMutation.isPending} onClick={() => reportMutation.mutate()}>
           <FileText size={16} /> Generate
         </button>
       </header>
@@ -399,11 +744,23 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
 export function App() {
   const [view, setView] = useState<View>("machines");
   const machines = useQuery({ queryKey: ["machines"], queryFn: api.machines });
+  const models = useQuery({ queryKey: ["models"], queryFn: api.models });
   const experiments = useQuery({ queryKey: ["experiments"], queryFn: api.experiments });
   const activeExperiment = experiments.data?.[0];
   const metrics = useQuery({
     queryKey: ["metrics", activeExperiment?.id],
-    queryFn: () => api.metrics(activeExperiment?.id ?? "experiment-container")
+    queryFn: () => api.metrics(activeExperiment?.id ?? ""),
+    enabled: Boolean(activeExperiment)
+  });
+  const trials = useQuery({
+    queryKey: ["trials", activeExperiment?.id],
+    queryFn: () => api.trials(activeExperiment?.id ?? ""),
+    enabled: Boolean(activeExperiment)
+  });
+  const runLog = useQuery({
+    queryKey: ["run-log", activeExperiment?.id],
+    queryFn: () => api.runLog(activeExperiment?.id ?? ""),
+    enabled: Boolean(activeExperiment)
   });
 
   return (
@@ -411,9 +768,20 @@ export function App() {
       {view === "machines" ? <MachinesView machines={machines.data ?? []} /> : null}
       {view === "bootstrap" ? <BootstrapView machines={machines.data ?? []} /> : null}
       {view === "experiments" ? (
-        <ExperimentsView machines={machines.data ?? []} experiments={experiments.data ?? []} />
+        <ExperimentsView
+          machines={machines.data ?? []}
+          models={models.data ?? []}
+          experiments={experiments.data ?? []}
+        />
       ) : null}
-      {view === "runs" ? <RunsView experiment={activeExperiment} metrics={metrics.data ?? []} /> : null}
+      {view === "runs" ? (
+        <RunsView
+          experiment={activeExperiment}
+          metrics={metrics.data ?? []}
+          trials={trials.data ?? []}
+          runLog={runLog.data}
+        />
+      ) : null}
       {view === "compare" ? (
         <CompareView experiments={experiments.data ?? []} metrics={metrics.data ?? []} />
       ) : null}

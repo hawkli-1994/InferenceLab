@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inflab.artifacts import distribution_plan, sha256_text
-from inflab.benchmark import build_launch_command, fake_benchmark_result, normalize_metrics
+from inflab.benchmark import (
+    build_benchmark_command_plan,
+    build_launch_command,
+    fake_benchmark_result,
+    normalize_metrics,
+)
 from inflab.db.models import (
     Artifact,
     BootstrapRun,
@@ -25,6 +30,7 @@ from inflab.db.models import (
     ReportRecord,
 )
 from inflab.db.session import get_session
+from inflab.demo_data import seed_demo_data
 from inflab.executor import ExecutionContext, FakeExecutor
 from inflab.jobs import fake_queue
 from inflab.plugins import registry
@@ -32,11 +38,17 @@ from inflab.reports import render_markdown_report
 from inflab.schemas import (
     ArtifactCreate,
     ArtifactRead,
+    BenchmarkCommandPlan,
     BenchmarkJobCreate,
+    BenchmarkPlanCreate,
     BootstrapRequest,
     BootstrapRunRead,
     ExperimentCreate,
+    ExperimentPlanRead,
+    ExperimentPlanRequest,
     ExperimentRead,
+    ExperimentRunLogRead,
+    FrameworkParams,
     ImageCreate,
     ImageRead,
     JobRead,
@@ -247,9 +259,49 @@ def _report_read(report: ReportRecord) -> ReportRead:
     )
 
 
+def _machine_gpu_count(machine: Machine) -> int:
+    gpu_rows = machine.machine_profile.get("hardware", {}).get("gpu", [])
+    if not isinstance(gpu_rows, list):
+        return 1
+    count = 0
+    for gpu in gpu_rows:
+        if isinstance(gpu, dict):
+            count += int(gpu.get("count", 1))
+    return max(count, 1)
+
+
+def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> ExperimentPlanRead:
+    phases, candidates = plan_candidates(gpu_count=gpu_count, max_trials=max_trials)
+    planned = []
+    for index, candidate in enumerate(candidates, start=1):
+        candidate_spec = run_spec.model_copy(update={"framework_params": candidate})
+        planned.append(
+            {
+                "trial_index": index,
+                "params": candidate.model_dump(mode="json"),
+                "launch_command": build_launch_command(candidate_spec),
+                "validation": "schema_validated_and_heuristic_pruned",
+            }
+        )
+    return ExperimentPlanRead(
+        phases=[phase.value for phase in phases],
+        candidates=planned,
+        trial_count=len(planned),
+        notes=[
+            "fake runner only; no SSH, GPU, NAS, Docker mutation, external LLM, or model download",
+            "candidate params are Pydantic validated before launch command generation",
+        ],
+    )
+
+
 @router.get("/openapi-ready", response_model=dict[str, str])
 def openapi_ready() -> dict[str, str]:
     return {"status": "ok", "schema": "/openapi.json"}
+
+
+@router.post("/dev/seed-demo-data", response_model=dict[str, int])
+def seed_demo_database(session: Session = Depends(get_session)) -> dict[str, int]:
+    return seed_demo_data(session)
 
 
 @router.get("/machines", response_model=Page)
@@ -538,6 +590,22 @@ def create_benchmark_job(
     return _job_read(fake_queue.enqueue(session, "benchmark", handler))
 
 
+@router.post("/benchmarks/plan", response_model=BenchmarkCommandPlan)
+def plan_benchmark_command(
+    payload: BenchmarkPlanCreate,
+    session: Session = Depends(get_session),
+) -> BenchmarkCommandPlan:
+    model = session.get(ModelRecord, payload.run_spec.model_id)
+    if session.get(Machine, payload.run_spec.machine_id) is None:
+        raise _not_found("machine")
+    if model is None:
+        raise _not_found("model")
+    try:
+        return build_benchmark_command_plan(payload, model_path=model.cache_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/jobs", response_model=list[JobRead])
 def list_jobs(session: Session = Depends(get_session)) -> list[JobRead]:
     return [_job_read(row) for row in session.scalars(select(JobRecord)).all()]
@@ -567,6 +635,24 @@ def get_job_progress(
     if job is None:
         raise _not_found("job")
     return {"status": job.status, "progress": job.progress}
+
+
+@router.post("/experiments/plan", response_model=ExperimentPlanRead)
+def plan_experiment(
+    payload: ExperimentPlanRequest,
+    session: Session = Depends(get_session),
+) -> ExperimentPlanRead:
+    machine = session.get(Machine, payload.run_spec.machine_id)
+    model = session.get(ModelRecord, payload.run_spec.model_id)
+    if machine is None:
+        raise _not_found("machine")
+    if model is None:
+        raise _not_found("model")
+    return _experiment_plan(
+        run_spec=payload.run_spec,
+        max_trials=int(payload.budget.get("max_trials", 2)),
+        gpu_count=_machine_gpu_count(machine),
+    )
 
 
 @router.post("/experiments", response_model=ExperimentRead, status_code=status.HTTP_201_CREATED)
@@ -606,18 +692,38 @@ def create_experiment(
     session.add(experiment)
     session.flush()
 
-    _, candidates = plan_candidates(max_trials=int(payload.budget.get("max_trials", 2)))
-    for index, candidate in enumerate(candidates, start=1):
-        candidate_spec = payload.run_spec.model_copy(update={"framework_params": candidate})
+    plan = _experiment_plan(
+        run_spec=payload.run_spec,
+        max_trials=int(payload.budget.get("max_trials", 2)),
+        gpu_count=_machine_gpu_count(machine),
+    )
+    job_logs = [
+        f"experiment {experiment.id} created",
+        f"phase order: {', '.join(plan.phases)}",
+        f"planned {plan.trial_count} fake trials",
+    ]
+    for candidate in plan.candidates:
+        candidate_params = FrameworkParams.model_validate(candidate.params)
+        candidate_spec = payload.run_spec.model_copy(update={"framework_params": candidate_params})
         result = fake_benchmark_result(candidate_spec)
         metrics = normalize_metrics(result)
+        trial_logs = [
+            f"trial {candidate.trial_index} started",
+            f"launch: {candidate.launch_command}",
+            f"trial {candidate.trial_index} succeeded",
+            f"tokens_per_second={metrics['tokens_per_second']}",
+        ]
         trial = ExperimentTrial(
             experiment_id=experiment.id,
-            trial_index=index,
-            params=candidate.model_dump(mode="json"),
-            launch_command=build_launch_command(candidate_spec),
+            trial_index=candidate.trial_index,
+            params=candidate.params,
+            launch_command=candidate.launch_command,
             status="succeeded",
-            result=result.model_dump(mode="json"),
+            result={
+                "benchmark_result": result.model_dump(mode="json"),
+                "metrics": metrics,
+                "logs": trial_logs,
+            },
         )
         session.add(trial)
         session.flush()
@@ -639,6 +745,22 @@ def create_experiment(
                 },
             )
         )
+        job_logs.extend(trial_logs)
+    job = JobRecord(
+        job_type="experiment",
+        status="succeeded",
+        progress=1.0,
+        logs=[*job_logs, "experiment completed"],
+        result={"experiment_id": experiment.id, "trial_count": plan.trial_count},
+    )
+    session.add(job)
+    session.flush()
+    experiment.reproducibility = {
+        **experiment.reproducibility,
+        "agent_phases": plan.phases,
+        "candidate_count": plan.trial_count,
+        "job_id": job.id,
+    }
     session.commit()
     session.refresh(experiment)
     return _experiment_read(experiment)
@@ -701,6 +823,33 @@ def list_trials(experiment_id: str, session: Session = Depends(get_session)) -> 
         select(ExperimentTrial).where(ExperimentTrial.experiment_id == experiment_id)
     ).all()
     return [_trial_read(row) for row in rows]
+
+
+@router.get("/experiments/{experiment_id}/run-log", response_model=ExperimentRunLogRead)
+def experiment_run_log(
+    experiment_id: str,
+    session: Session = Depends(get_session),
+) -> ExperimentRunLogRead:
+    experiment = session.get(Experiment, experiment_id)
+    if experiment is None:
+        raise _not_found("experiment")
+    lines = [
+        f"experiment {experiment.id} {experiment.status}",
+        f"runtime={experiment.runtime_mode} framework={experiment.framework}",
+        f"launch={experiment.launch_command}",
+    ]
+    rows = session.scalars(
+        select(ExperimentTrial)
+        .where(ExperimentTrial.experiment_id == experiment_id)
+        .order_by(ExperimentTrial.trial_index)
+    ).all()
+    for trial in rows:
+        result_logs = trial.result.get("logs", [])
+        if isinstance(result_logs, list):
+            lines.extend(str(line) for line in result_logs)
+        else:
+            lines.append(f"trial {trial.trial_index} {trial.status}")
+    return ExperimentRunLogRead(experiment_id=experiment_id, lines=lines)
 
 
 @router.get("/experiments/{experiment_id}/metrics", response_model=list[MetricsSummaryRead])
@@ -799,6 +948,17 @@ def generate_report(
     session.commit()
     session.refresh(report)
     return _report_read(report)
+
+
+@router.get("/reports", response_model=list[ReportRead])
+def list_reports(
+    experiment_id: str | None = None,
+    session: Session = Depends(get_session),
+) -> list[ReportRead]:
+    stmt = select(ReportRecord)
+    if experiment_id is not None:
+        stmt = stmt.where(ReportRecord.experiment_id == experiment_id)
+    return [_report_read(row) for row in session.scalars(stmt).all()]
 
 
 @router.get("/reports/{report_id}", response_model=ReportRead)

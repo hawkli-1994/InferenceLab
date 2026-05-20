@@ -1,10 +1,16 @@
 import pytest
 
-from inflab.benchmark import fake_benchmark_result, normalize_metrics, validate_fair_comparison
+from inflab.benchmark import (
+    build_benchmark_command_plan,
+    fake_benchmark_result,
+    normalize_metrics,
+    parse_vllm_bench_output,
+    validate_fair_comparison,
+)
 from inflab.executor import ExecutionContext, FakeExecutor
 from inflab.plugins import registry
 from inflab.reports import render_markdown_report
-from inflab.schemas import FrameworkParams, RunSpec
+from inflab.schemas import BenchmarkPlanCreate, FrameworkParams, RunSpec
 from inflab.security import decrypt_secret, encrypt_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
 from inflab.tuning import heuristic_prune, plan_candidates
@@ -59,6 +65,26 @@ def test_benchmark_normalization_and_fairness() -> None:
 
     with pytest.raises(ValueError, match="same prompt dataset"):
         validate_fair_comparison(left, right.model_copy(update={"prompt_dataset": "other"}))
+
+
+def test_vllm_benchmark_command_plan_and_parser() -> None:
+    plan = build_benchmark_command_plan(
+        BenchmarkPlanCreate(run_spec=run_spec("container"), kind="serve", num_prompts=8),
+        model_path="/data/models/qwen3",
+    )
+
+    assert "vllm bench serve" in plan.bench_command
+    assert "--save-result" in plan.bench_command
+    assert plan.result_path.endswith("vllm-bench-result.json")
+
+    parsed = parse_vllm_bench_output(
+        "Request throughput (req/s): 12.5\n"
+        "Output token throughput (tok/s): 4096.0\n"
+        "P99 TTFT (ms): 230.0\n"
+    )
+    assert parsed["request_throughput"] == 12.5
+    assert parsed["output_throughput"] == 4096.0
+    assert parsed["p99_ttft_ms"] == 230.0
 
 
 def test_tuning_candidates_are_valid_and_pruned() -> None:

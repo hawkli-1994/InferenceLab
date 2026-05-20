@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import random
+from collections.abc import Callable
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, ValidationError
@@ -76,7 +77,9 @@ def heuristic_prune(candidates: list[FrameworkParams]) -> list[FrameworkParams]:
 
 
 def plan_candidates(
-    gpu_count: int = 1, max_trials: int = 2
+    gpu_count: int = 1,
+    max_trials: int = 2,
+    llm_candidates: list[FrameworkParams] | None = None,
 ) -> tuple[list[AgentPhase], list[FrameworkParams]]:
     phases = [
         AgentPhase.observe,
@@ -93,6 +96,7 @@ def plan_candidates(
         *grid_search(),
         *random_search(),
         *provider.generate({}).candidates,
+        *(llm_candidates or []),
     ]
     valid: list[FrameworkParams] = []
     for candidate in candidates:
@@ -101,3 +105,40 @@ def plan_candidates(
         except ValidationError:
             continue
     return phases, heuristic_prune(valid)[:max_trials]
+
+
+def run_agent_tuning_loop(
+    *,
+    gpu_count: int,
+    max_trials: int,
+    runner: Callable[[FrameworkParams], dict[str, object]],
+    llm_candidates: list[FrameworkParams] | None = None,
+) -> dict[str, object]:
+    phases, candidates = plan_candidates(
+        gpu_count=gpu_count,
+        max_trials=max_trials,
+        llm_candidates=llm_candidates,
+    )
+    observations = []
+    best: dict[str, object] | None = None
+    for index, candidate in enumerate(candidates, start=1):
+        result = runner(candidate)
+        metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
+        score = 0.0
+        if isinstance(metrics, dict):
+            score = float(metrics.get("tokens_per_second", 0.0))
+        observation = {
+            "trial_index": index,
+            "params": candidate.model_dump(mode="json"),
+            "result": result,
+            "score": score,
+        }
+        observations.append(observation)
+        if best is None or score > float(best["score"]):
+            best = observation
+    return {
+        "phases": [phase.value for phase in phases],
+        "observations": observations,
+        "best": best,
+        "status": "succeeded" if observations else "no_candidates",
+    }

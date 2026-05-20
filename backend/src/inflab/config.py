@@ -21,6 +21,7 @@ class RedisSettings(BaseSettings):
 
     url: str = "redis://127.0.0.1:6379/0"
     queue_name: str = "default"
+    job_mode: Literal["sync", "rq"] = "sync"
 
 
 class ObjectStorageSettings(BaseSettings):
@@ -56,7 +57,10 @@ class AppSettings(BaseSettings):
     app_name: str = Field(default="InferenceLab API", validation_alias="INFLAB_APP_NAME")
     environment: str = Field(default="local", validation_alias="INFLAB_ENVIRONMENT")
     log_level: str = Field(default="INFO", validation_alias="INFLAB_LOG_LEVEL")
-    secret_key: SecretStr = Field(default=SecretStr("inference-lab-dev-key"))
+    secret_key: SecretStr = Field(
+        default=SecretStr("inference-lab-dev-key"),
+        validation_alias="INFLAB_SECRET_KEY",
+    )
     seed_demo_data: bool = Field(default=False, validation_alias="INFLAB_SEED_DEMO_DATA")
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)

@@ -1,6 +1,75 @@
 name: inflab
 
 services:
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      INFLAB_ENVIRONMENT: compose
+      INFLAB_LOG_LEVEL: INFO
+      INFLAB_SECRET_KEY: inference-lab-compose-dev-key
+      INFLAB_DATABASE_URL: postgresql+psycopg://inflab:inflab@postgres:5432/inflab
+      INFLAB_DATABASE_CREATE_SCHEMA_ON_STARTUP: "true"
+      INFLAB_REDIS_URL: redis://redis:6379/0
+      INFLAB_REDIS_QUEUE_NAME: default
+      INFLAB_REDIS_JOB_MODE: rq
+      INFLAB_S3_ENDPOINT_URL: http://minio:9000
+      INFLAB_S3_BUCKET_NAME: inflab-artifacts
+      INFLAB_S3_ACCESS_KEY_ID: inflabminio
+      INFLAB_S3_SECRET_ACCESS_KEY: inflabminio
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "default"]
+    environment:
+      INFLAB_ENVIRONMENT: compose
+      INFLAB_LOG_LEVEL: INFO
+      INFLAB_SECRET_KEY: inference-lab-compose-dev-key
+      INFLAB_DATABASE_URL: postgresql+psycopg://inflab:inflab@postgres:5432/inflab
+      INFLAB_REDIS_URL: redis://redis:6379/0
+      INFLAB_REDIS_QUEUE_NAME: default
+      INFLAB_REDIS_JOB_MODE: rq
+      INFLAB_S3_ENDPOINT_URL: http://minio:9000
+      INFLAB_S3_BUCKET_NAME: inflab-artifacts
+      INFLAB_S3_ACCESS_KEY_ID: inflabminio
+      INFLAB_S3_SECRET_ACCESS_KEY: inflabminio
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE: /api/v1
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     environment:
@@ -46,6 +115,19 @@ services:
       retries: 5
     volumes:
       - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 inflabminio inflabminio
+        mc mb -p local/inflab-artifacts || true
+        mc anonymous set none local/inflab-artifacts || true
 
 volumes:
   postgres-data:

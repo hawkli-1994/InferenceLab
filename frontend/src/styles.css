@@ -193,7 +193,9 @@ select {
 }
 
 .form-actions,
-.inline-controls {
+.inline-controls,
+.toolbar,
+.row-actions {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
@@ -208,10 +210,36 @@ select {
   max-width: 260px;
 }
 
+.toolbar {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-actions {
+  align-items: center;
+  gap: 6px;
+}
+
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  min-height: 38px;
+  color: #43514e;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+}
+
 .form-note {
   align-self: center;
   color: #6a7773;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .table-panel {
@@ -242,6 +270,10 @@ th {
 code,
 pre {
   font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+code {
+  overflow-wrap: anywhere;
 }
 
 pre {

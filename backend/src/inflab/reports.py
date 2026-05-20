@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import tempfile
+from pathlib import Path
+
 from jinja2 import Template
 
 from inflab.security import redact_text
@@ -58,3 +62,30 @@ def render_markdown_report(
         metrics=metrics,
     )
     return redact_text(markdown)
+
+
+def export_report(markdown: str, *, output_format: str) -> bytes:
+    if output_format == "markdown":
+        return markdown.encode()
+    if output_format not in {"pdf", "docx"}:
+        raise ValueError("report format must be markdown, pdf, or docx")
+
+    suffix = ".pdf" if output_format == "pdf" else ".docx"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / "report.md"
+        output_path = Path(tmpdir) / f"report{suffix}"
+        input_path.write_text(markdown)
+        command = ["pandoc", str(input_path), "-o", str(output_path)]
+        if output_format == "pdf":
+            command.extend(["--pdf-engine=typst"])
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            message = completed.stderr.strip() or completed.stdout.strip() or "pandoc export failed"
+            raise RuntimeError(message)
+        return output_path.read_bytes()

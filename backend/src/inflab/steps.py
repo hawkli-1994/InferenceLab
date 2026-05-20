@@ -88,7 +88,12 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B1",
         name="Access Bootstrap",
         detect_command="id inflab || true",
-        apply_command="useradd -m inflab && install -d /home/inflab/.ssh",
+        apply_command=(
+            "id inflab >/dev/null 2>&1 || useradd -m inflab; "
+            "install -d -m 700 -o inflab -g inflab /home/inflab/.ssh; "
+            "printf 'inflab ALL=(ALL) NOPASSWD:ALL\\n' > /etc/sudoers.d/inflab; "
+            "chmod 440 /etc/sudoers.d/inflab"
+        ),
         verify_command="test -d /home/inflab/.ssh",
         changed_files=["/etc/sudoers.d/inflab", "/home/inflab/.ssh/authorized_keys"],
         snapshot_keys=["sshd_config", "users"],
@@ -98,7 +103,12 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B2",
         name="Source Bootstrap",
         detect_command="test -f /etc/apt/sources.list || true",
-        apply_command="write mirror configuration for apt/pip/docker/huggingface",
+        apply_command=(
+            "install -d /etc/pip.conf.d /etc/docker; "
+            "printf '[global]\\ntimeout = 60\\nretries = 5\\n' > /etc/pip.conf; "
+            "touch /etc/apt/sources.list; "
+            'printf \'{"features":{"buildkit":true}}\\n\' > /etc/docker/daemon.json'
+        ),
         verify_command="test -f /etc/apt/sources.list",
         changed_files=["/etc/apt/sources.list", "/etc/docker/daemon.json"],
         snapshot_keys=["sources"],
@@ -108,7 +118,11 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B3",
         name="Package Bootstrap",
         detect_command="command -v jq && command -v rsync || true",
-        apply_command="apt-get install -y jq rsync curl git python3",
+        apply_command=(
+            "export DEBIAN_FRONTEND=noninteractive; "
+            "apt-get update && apt-get install -y "
+            "jq rsync curl git python3 python3-venv python3-pip"
+        ),
         verify_command="command -v jq && command -v rsync",
         changed_files=["/var/lib/dpkg/status"],
         snapshot_keys=["packages"],
@@ -128,8 +142,14 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B5",
         name="Container Bootstrap",
         detect_command="docker info || true",
-        apply_command="write docker dry-run runtime configuration",
-        verify_command="echo docker runtime dry-run verified",
+        apply_command=(
+            "install -d /etc/docker; "
+            'printf \'{"features":{"buildkit":true},"default-runtime":"nvidia",'
+            '"runtimes":{"nvidia":{"path":"nvidia-container-runtime","runtimeArgs":[]}}}\\n\' '
+            "> /etc/docker/daemon.json; "
+            "systemctl restart docker || true"
+        ),
+        verify_command="test -f /etc/docker/daemon.json",
         changed_files=["/etc/docker/daemon.json"],
         snapshot_keys=["docker_info"],
         failure_hint="Check Docker installation or dry-run runtime settings.",
@@ -138,9 +158,16 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B6",
         name="Baseline Tuning Record",
         detect_command="sysctl -a | head || true",
-        apply_command="record baseline tuning without kernel mutation",
-        verify_command="echo baseline captured",
-        changed_files=[],
+        apply_command=(
+            "install -d /data/logs; "
+            "sysctl -a > /data/logs/inflab-sysctl-baseline.txt 2>/dev/null || true; "
+            "ulimit -a > /data/logs/inflab-ulimit-baseline.txt || true"
+        ),
+        verify_command="test -f /data/logs/inflab-sysctl-baseline.txt",
+        changed_files=[
+            "/data/logs/inflab-sysctl-baseline.txt",
+            "/data/logs/inflab-ulimit-baseline.txt",
+        ],
         snapshot_keys=["sysctl_baseline"],
         failure_hint="Check host sysctl read permissions.",
     ),
@@ -148,7 +175,11 @@ BOOTSTRAP_STEPS: dict[str, ShellRemoteStep] = {
         id="B7",
         name="Bare-Metal Runtime Bootstrap",
         detect_command="python3 --version || true",
-        apply_command="python3 -m venv /data/workspace/inflab-venv",
+        apply_command=(
+            "mkdir -p /data/workspace; "
+            "test -d /data/workspace/inflab-venv || python3 -m venv /data/workspace/inflab-venv; "
+            "/data/workspace/inflab-venv/bin/python -m pip install -U pip wheel"
+        ),
         verify_command="test -d /data/workspace/inflab-venv",
         changed_files=["/data/workspace/inflab-venv"],
         snapshot_keys=["python", "pip_freeze"],

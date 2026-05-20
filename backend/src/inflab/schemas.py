@@ -168,6 +168,20 @@ class ModelRead(BaseModel):
     created_at: datetime
 
 
+class ModelDistributeRequest(BaseModel):
+    machine_id: str
+    target_path: str | None = None
+    dry_run: bool = True
+
+
+class ModelDistributeRead(BaseModel):
+    model_id: str
+    machine_id: str
+    source: str
+    target_path: str
+    result: dict[str, Any]
+
+
 class ImageCreate(BaseModel):
     name: str
     tag: str
@@ -204,6 +218,14 @@ class ArtifactRead(BaseModel):
     size_bytes: int
     metadata: dict[str, Any]
     created_at: datetime
+
+
+class ArtifactUploadText(BaseModel):
+    kind: Literal["log", "report", "snapshot", "metrics"]
+    name: str
+    content: str
+    content_type: str = "text/plain"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class FrameworkParams(BaseModel):
@@ -249,10 +271,6 @@ class BenchmarkResult(BaseModel):
     failures: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class BenchmarkJobCreate(BaseModel):
-    run_spec: RunSpec
-
-
 class BenchmarkPlanCreate(BaseModel):
     run_spec: RunSpec
     kind: BenchmarkKind = BenchmarkKind.serve
@@ -265,6 +283,12 @@ class BenchmarkPlanCreate(BaseModel):
     request_rate: float | None = Field(default=None, gt=0)
     result_dir: str = "/data/logs/inflab-bench"
     result_filename: str = "vllm-bench-result.json"
+
+
+class BenchmarkJobCreate(BaseModel):
+    run_spec: RunSpec
+    execution_mode: Literal["fake", "remote_rq", "remote_inline"] = "fake"
+    benchmark: BenchmarkPlanCreate | None = None
 
 
 class BenchmarkCommandPlan(BaseModel):

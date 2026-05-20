@@ -138,7 +138,8 @@
 - [x] `uv run pytest` 通过。
 - [x] `uv run ruff check .` 通过。
 - [x] `uv run ruff format --check .` 通过。
-- [ ] Docker Compose 可启动后端依赖服务。
+- [x] Docker Compose 定义包含 backend API、RQ worker、frontend、PostgreSQL、Redis、MinIO
+  和 bucket init。
 - [x] 使用 fake executor 跑通机器纳管、bootstrap、benchmark、experiment、report 的最小闭环。
 - [x] 后端接口文档更新完成。
 - [x] `AGENTS.md` 中的后端约束与实际实现一致。
@@ -161,19 +162,33 @@
 
 ## Forward Development While E2E/CI Is Bypassed
 
-继续按用户要求绕过真实 E2E 和 CI gate；本节只记录不依赖真实 SSH/GPU/Docker mutation 的功能推进。
+继续按用户要求绕过真实 E2E 和 CI gate；本节记录默认测试不依赖真实 SSH/GPU/Docker
+mutation 的功能推进。真实 SSH 路径可以手动 opt-in，但不作为默认测试前提。
 
+- [x] 实现真实 AsyncSSH executor：password/private key、host key policy、cwd/env/sudo/timeout、SFTP upload/download。
+- [x] 将 `POST /api/v1/machines/{machine_id}/bootstrap` 的 `dry_run=false` 接入真实 AsyncSSH executor。
+- [x] 为真实 SSH executor 增加 mock AsyncSSH 单元测试，不依赖真实机器。
 - [x] 新增实验候选预览 API：`POST /api/v1/experiments/plan`。
-- [x] 新增 vLLM benchmark command-plan API：`POST /api/v1/benchmarks/plan`，只生成 `vllm bench` 命令，不执行真实推理。
+- [x] 新增 vLLM/SGLang benchmark command-plan API：`POST /api/v1/benchmarks/plan`。
+- [x] 新增真实 benchmark opt-in 执行：`execution_mode=remote_inline` 通过 AsyncSSH 运行，
+  `execution_mode=remote_rq` 通过 Redis/RQ worker 调度。
+- [x] 新增真实机器探测 opt-in：`POST /api/v1/machines/{machine_id}/probe?dry_run=false`。
+- [x] 新增模型分发 opt-in：rsync、NFS、MinIO、HuggingFace、ModelScope 命令路径。
+- [x] 新增 S3/MinIO artifact 上传实现和测试。
+- [x] 远程 benchmark 日志和 raw result 以 best-effort 方式上传 artifact。
+- [x] 新增 Pandoc/Typst 报告导出路径；工具链不可用时返回 503。
+- [x] 使用 LiteLLM 实现 OpenAI-compatible/Anthropic LLM candidate provider adapter。
+- [x] 将 AsyncSSH executor 的 benchmark 日志改为 process stdout/stderr 流式读取。
 - [x] 创建实验时记录 Agent phase、candidate count、experiment job、trial 日志。
 - [x] 新增实验运行日志聚合 API：`GET /api/v1/experiments/{experiment_id}/run-log`。
 - [x] 新增报告列表 API：`GET /api/v1/reports`，支持按 `experiment_id` 过滤。
 - [x] 新增数据库 demo seed：`POST /api/v1/dev/seed-demo-data` 和 `INFLAB_SEED_DEMO_DATA=true`。
-- [x] 前端机器表单接入真实新增机器、探测 API。
-- [x] 前端 Bootstrap 页面接入 dry-run 执行和结构化 step 输出。
-- [x] 前端实验创建页接入数据库模型注册、候选预览、实验创建。
-- [x] 前端 Run 页面展示真实 trial、run-log、metrics。
-- [x] 前端 Report 页面读取真实报告列表并触发生成。
+- [x] 前端机器表单接入真实新增机器、dry-run/SSH 探测 API。
+- [x] 前端 Bootstrap 页面接入 dry-run/SSH 执行和结构化 step 输出。
+- [x] 前端实验创建页接入数据库模型注册、模型分发、候选预览、实验创建。
+- [x] 前端 Run 页面展示真实 trial、run-log、metrics，并可提交 fake/remote inline/remote RQ benchmark job。
+- [x] 前端 Run 页面轮询 job logs/progress。
+- [x] 前端 Report 页面读取真实报告列表、触发生成、请求导出、展示 artifacts。
 - [x] 删除前端本地 mock fallback；前端只通过后端 API 读取数据库数据。
 
 ## Working Rule

@@ -1,14 +1,21 @@
 import type {
+  ArtifactRecord,
+  BenchmarkJobPayload,
   BootstrapRun,
   Experiment,
   ExperimentCreatePayload,
   ExperimentPlan,
   ExperimentRunLog,
+  JobRecord,
   Machine,
   MachineCreatePayload,
+  MachineSnapshot,
   MetricsSummary,
+  ModelDistributePayload,
+  ModelDistributeResult,
   ModelCreatePayload,
   ModelRecord,
+  ReportDownload,
   ReportRecord,
   Trial
 } from "./types";
@@ -50,15 +57,24 @@ export const api = {
     getJson<ReportRecord[]>(experimentId ? `/reports?experiment_id=${experimentId}` : "/reports"),
   seedDemoData: () => sendJson<Record<string, number>>("/dev/seed-demo-data"),
   createMachine: (payload: MachineCreatePayload) => sendJson<Machine>("/machines", payload),
-  probeMachine: (machineId: string) => sendJson<Record<string, unknown>>(`/machines/${machineId}/probe`),
-  bootstrapMachine: (machineId: string, profile: string) =>
-    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, { profile, dry_run: true }),
+  probeMachine: (machineId: string, dryRun = true) =>
+    sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
+  bootstrapMachine: (machineId: string, profile: string, dryRun = true) =>
+    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, { profile, dry_run: dryRun }),
   createModel: (payload: ModelCreatePayload) => sendJson<ModelRecord>("/models", payload),
+  distributeModel: (modelId: string, payload: ModelDistributePayload) =>
+    sendJson<ModelDistributeResult>(`/models/${modelId}/distribute`, payload),
   planExperiment: (payload: ExperimentCreatePayload) =>
     sendJson<ExperimentPlan>("/experiments/plan", { run_spec: payload.run_spec, budget: payload.budget }),
   createExperiment: (payload: ExperimentCreatePayload) =>
     sendJson<Experiment>("/experiments", payload),
+  createBenchmarkJob: (payload: BenchmarkJobPayload) => sendJson<JobRecord>("/benchmarks/jobs", payload),
+  jobs: () => getJson<JobRecord[]>("/jobs"),
+  jobLogs: (jobId: string) => getJson<{ logs: string[] }>(`/jobs/${jobId}/logs`),
   runLog: (experimentId: string) => getJson<ExperimentRunLog>(`/experiments/${experimentId}/run-log`),
   generateReport: (experimentId: string) =>
-    sendJson<ReportRecord>(`/experiments/${experimentId}/reports`, { template: "internal" })
+    sendJson<ReportRecord>(`/experiments/${experimentId}/reports`, { template: "internal" }),
+  downloadReport: (reportId: string, format: "markdown" | "pdf" | "docx") =>
+    getJson<ReportDownload>(`/reports/${reportId}/download?format=${format}`),
+  artifacts: () => getJson<ArtifactRecord[]>("/artifacts")
 };

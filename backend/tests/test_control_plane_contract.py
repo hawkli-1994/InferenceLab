@@ -89,6 +89,30 @@ def test_demo_seed_populates_database_backed_workbench_data(client: TestClient) 
     assert all(report["artifact_id"] for report in reports_response.json())
 
 
+def test_real_ssh_bootstrap_requires_stored_credential(client: TestClient) -> None:
+    machine_response = client.post(
+        "/api/v1/machines",
+        json={
+            "name": "no-credential",
+            "host": "10.0.0.99",
+            "username": "seed",
+            "runtime_mode": "both",
+        },
+    )
+    assert machine_response.status_code == 201
+    machine = machine_response.json()
+
+    bootstrap_response = client.post(
+        f"/api/v1/machines/{machine['id']}/bootstrap",
+        json={"profile": "minimal", "dry_run": False},
+    )
+
+    assert bootstrap_response.status_code == 400
+    assert (
+        bootstrap_response.json()["error"]["message"] == "machine has no SSH credential configured"
+    )
+
+
 def test_fake_control_plane_business_loop(client: TestClient) -> None:
     machine, snapshot = create_ready_machine(client)
     assert snapshot["profile"]["hardware"]["gpu"][0]["model"] == "MockGPU"

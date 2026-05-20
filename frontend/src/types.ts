@@ -1,5 +1,7 @@
 export type RuntimeMode = "container" | "bare_metal" | "both";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type ExecutionMode = "fake" | "remote_inline" | "remote_rq";
+export type BenchmarkKind = "serve" | "throughput";
 
 export interface Machine {
   id: string;
@@ -32,6 +34,15 @@ export interface BootstrapRun {
   }>;
 }
 
+export interface MachineSnapshot {
+  id: string;
+  machine_id: string;
+  profile: Record<string, unknown>;
+  fingerprint: string;
+  artifact_uri: string | null;
+  created_at: string;
+}
+
 export interface ModelRecord {
   id: string;
   name: string;
@@ -45,11 +56,27 @@ export interface ModelRecord {
 
 export interface ModelCreatePayload {
   name: string;
-  source: "mock" | "rsync" | "nfs" | "minio" | "huggingface" | "modelscope";
+  source: ModelSource;
   format: string;
   cache_path: string;
   sha256?: string;
   metadata?: Record<string, unknown>;
+}
+
+export type ModelSource = "mock" | "rsync" | "nfs" | "minio" | "huggingface" | "modelscope";
+
+export interface ModelDistributePayload {
+  machine_id: string;
+  target_path?: string;
+  dry_run: boolean;
+}
+
+export interface ModelDistributeResult {
+  model_id: string;
+  machine_id: string;
+  source: string;
+  target_path: string;
+  result: Record<string, unknown>;
 }
 
 export interface MachineCreatePayload {
@@ -86,6 +113,38 @@ export interface RunSpec {
   framework_params?: FrameworkParams;
   prompt_dataset?: string;
   benchmark_version?: string;
+}
+
+export interface BenchmarkPlanPayload {
+  run_spec: RunSpec;
+  kind: BenchmarkKind;
+  host?: string;
+  port?: number;
+  dataset_name?: string;
+  input_len?: number;
+  output_len?: number;
+  num_prompts?: number;
+  request_rate?: number;
+  result_dir?: string;
+  result_filename?: string;
+}
+
+export interface BenchmarkJobPayload {
+  run_spec: RunSpec;
+  execution_mode: ExecutionMode;
+  benchmark?: BenchmarkPlanPayload;
+}
+
+export interface JobRecord {
+  id: string;
+  job_type: string;
+  status: JobStatus;
+  progress: number;
+  logs: string[];
+  result: Record<string, unknown>;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ExperimentCreatePayload {
@@ -166,5 +225,22 @@ export interface ReportRecord {
   status: JobStatus;
   markdown: string;
   artifact_id: string | null;
+  created_at: string;
+}
+
+export interface ReportDownload {
+  format: string;
+  uri: string;
+  presigned_url?: string;
+}
+
+export interface ArtifactRecord {
+  id: string;
+  kind: string;
+  name: string;
+  uri: string;
+  sha256: string | null;
+  size_bytes: number;
+  metadata: Record<string, unknown>;
   created_at: string;
 }

@@ -5,6 +5,7 @@ import {
   Boxes,
   ClipboardList,
   Database,
+  Download,
   FileText,
   GitCompare,
   HardDrive,
@@ -21,14 +22,19 @@ import type { ElementType, ReactNode } from "react";
 
 import { api } from "./api";
 import type {
+  BenchmarkKind,
   BootstrapRun,
+  ExecutionMode,
   Experiment,
   ExperimentCreatePayload,
   ExperimentPlan,
   ExperimentRunLog,
+  JobRecord,
   Machine,
   MetricsSummary,
+  ModelDistributeResult,
   ModelRecord,
+  ModelSource,
   RuntimeMode,
   Trial
 } from "./types";
@@ -48,6 +54,28 @@ const navItems: Array<{ id: View; label: string; icon: ElementType }> = [
 function numberValue(value: FormDataEntryValue | null, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumberValue(value: FormDataEntryValue | null) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function runSpecFromExperiment(experiment: Experiment) {
+  return {
+    machine_id: experiment.machine_id,
+    model_id: experiment.model_id,
+    runtime_mode: experiment.runtime_mode as Exclude<RuntimeMode, "both">,
+    framework: experiment.framework as "vllm" | "sglang",
+    framework_version: experiment.framework_version,
+    framework_params: experiment.framework_params,
+    prompt_dataset: experiment.prompt_dataset,
+    benchmark_version: "inflab-bench-real-v1"
+  };
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -97,6 +125,7 @@ function Shell({
 
 function MachinesView({ machines }: { machines: Machine[] }) {
   const queryClient = useQueryClient();
+  const [probeDryRun, setProbeDryRun] = useState(true);
   const createMachine = useMutation({
     mutationFn: (formData: FormData) =>
       api.createMachine({
@@ -113,7 +142,7 @@ function MachinesView({ machines }: { machines: Machine[] }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["machines"] })
   });
   const probeMachine = useMutation({
-    mutationFn: (machineId: string) => api.probeMachine(machineId),
+    mutationFn: (machineId: string) => api.probeMachine(machineId, probeDryRun),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["machines"] })
   });
   const seedDemoData = useMutation({
@@ -132,11 +161,21 @@ function MachinesView({ machines }: { machines: Machine[] }) {
       <header className="page-head">
         <div>
           <h1>Machine Pool</h1>
-          <p>SSH onboarding records, machine profiles, and current readiness.</p>
+          <p>SSH onboarding records, real probe snapshots, and current readiness.</p>
         </div>
-        <button className="secondary" onClick={() => seedDemoData.mutate()} disabled={seedDemoData.isPending}>
-          <Database size={16} /> {seedDemoData.isPending ? "Seeding" : "Seed DB"}
-        </button>
+        <div className="toolbar">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={probeDryRun}
+              onChange={(event) => setProbeDryRun(event.target.checked)}
+            />
+            Dry-run probe
+          </label>
+          <button className="secondary" onClick={() => seedDemoData.mutate()} disabled={seedDemoData.isPending}>
+            <Database size={16} /> {seedDemoData.isPending ? "Seeding" : "Seed DB"}
+          </button>
+        </div>
       </header>
       <div className="split">
         <form
@@ -202,7 +241,11 @@ function MachinesView({ machines }: { machines: Machine[] }) {
                   <td>{machine.runtime_mode}</td>
                   <td className="mono">{machine.fingerprint ?? "pending"}</td>
                   <td>
-                    <button className="icon-button" title="Probe machine" onClick={() => probeMachine.mutate(machine.id)}>
+                    <button
+                      className="icon-button"
+                      title={probeDryRun ? "Probe with dry-run profile" : "Probe over SSH"}
+                      onClick={() => probeMachine.mutate(machine.id)}
+                    >
                       <Search size={15} />
                     </button>
                   </td>
@@ -220,10 +263,11 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   const queryClient = useQueryClient();
   const [machineId, setMachineId] = useState("");
   const [profile, setProfile] = useState("full");
+  const [dryRun, setDryRun] = useState(true);
   const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
   const selectedMachineId = machineId || machines[0]?.id || "";
   const runBootstrap = useMutation({
-    mutationFn: () => api.bootstrapMachine(selectedMachineId, profile),
+    mutationFn: () => api.bootstrapMachine(selectedMachineId, profile, dryRun),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
       queryClient.invalidateQueries({ queryKey: ["machines"] });
@@ -236,7 +280,7 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
       <header className="page-head">
         <div>
           <h1>Bootstrap Profiles</h1>
-          <p>B1-B7 dry-run execution with structured step output.</p>
+          <p>B1-B7 execution with structured detect, apply, and verify output.</p>
         </div>
       </header>
       <div className="panel flow">
@@ -270,8 +314,12 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
             <option value="standard_bare_metal">standard bare metal</option>
             <option value="full">full</option>
           </select>
+          <label className="check-row">
+            <input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} />
+            Dry-run
+          </label>
           <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
-            <Play size={16} /> {runBootstrap.isPending ? "Running" : "Run Dry-Run"}
+            <Play size={16} /> {runBootstrap.isPending ? "Running" : dryRun ? "Run Dry-Run" : "Run SSH"}
           </button>
         </div>
       </div>
@@ -317,18 +365,29 @@ function ExperimentsView({
   const [plan, setPlan] = useState<ExperimentPlan | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [distributeDryRun, setDistributeDryRun] = useState(true);
+  const [distributionResult, setDistributionResult] = useState<ModelDistributeResult | null>(null);
   const machineId = selectedMachineId || machines[0]?.id || "";
   const modelId = selectedModelId || models[0]?.id || "";
   const createModel = useMutation({
     mutationFn: (formData: FormData) =>
       api.createModel({
         name: String(formData.get("model_name") ?? "Qwen3-32B"),
-        source: "mock",
+        source: String(formData.get("source") ?? "mock") as ModelSource,
         format: "safetensors",
         cache_path: String(formData.get("cache_path") ?? "/data/models/qwen3-32b"),
         metadata: { owner: "workbench" }
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["models"] })
+  });
+  const distributeModel = useMutation({
+    mutationFn: (formData: FormData) =>
+      api.distributeModel(modelId, {
+        machine_id: machineId,
+        target_path: String(formData.get("target_path") ?? "").trim() || undefined,
+        dry_run: distributeDryRun
+      }),
+    onSuccess: setDistributionResult
   });
   const planExperiment = useMutation({
     mutationFn: (payload: ExperimentCreatePayload) => api.planExperiment(payload),
@@ -352,9 +411,9 @@ function ExperimentsView({
       model_id: String(formData.get("model_id") ?? modelId),
       runtime_mode: String(formData.get("runtime_mode") ?? "container") as "container" | "bare_metal",
       framework: String(formData.get("framework") ?? "vllm") as "vllm" | "sglang",
-      framework_version: String(formData.get("framework_version") ?? "0.9.0-mock"),
-      prompt_dataset: String(formData.get("prompt_dataset") ?? "mock_prompts_v1"),
-      benchmark_version: "inflab-bench-mock-v1",
+      framework_version: String(formData.get("framework_version") ?? "0.10.0"),
+      prompt_dataset: String(formData.get("prompt_dataset") ?? "random"),
+      benchmark_version: "inflab-bench-real-v1",
       framework_params: {
         tensor_parallel_size: numberValue(formData.get("tensor_parallel_size"), 1),
         gpu_memory_utilization: numberValue(formData.get("gpu_memory_utilization"), 0.88),
@@ -386,6 +445,17 @@ function ExperimentsView({
           <label>
             Cache Path
             <input name="cache_path" defaultValue="/data/models/qwen3-32b" />
+          </label>
+          <label>
+            Source
+            <select name="source" defaultValue="mock">
+              <option value="mock">existing path</option>
+              <option value="rsync">rsync mirror</option>
+              <option value="nfs">NFS mount</option>
+              <option value="minio">MinIO/S3</option>
+              <option value="huggingface">Hugging Face</option>
+              <option value="modelscope">ModelScope</option>
+            </select>
           </label>
           <button className="primary form-action" disabled={createModel.isPending}>
             <Database size={16} /> {createModel.isPending ? "Registering" : "Register Model"}
@@ -454,11 +524,11 @@ function ExperimentsView({
           </label>
           <label>
             Framework Version
-            <input name="framework_version" defaultValue="0.9.0-mock" />
+            <input name="framework_version" defaultValue="0.10.0" />
           </label>
           <label>
             Prompt Dataset
-            <input name="prompt_dataset" defaultValue="mock_prompts_v1" />
+            <input name="prompt_dataset" defaultValue="random" />
           </label>
           <label>
             Tensor Parallel
@@ -496,6 +566,32 @@ function ExperimentsView({
           </div>
         </form>
       </div>
+      <form
+        className="panel form-grid"
+        onSubmit={(event) => {
+          event.preventDefault();
+          distributeModel.mutate(new FormData(event.currentTarget));
+        }}
+      >
+        <label>
+          Distribution Target
+          <input name="target_path" placeholder="default model cache path" />
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={distributeDryRun}
+            onChange={(event) => setDistributeDryRun(event.target.checked)}
+          />
+          Dry-run distribution
+        </label>
+        <button className="secondary form-action" disabled={!machineId || !modelId || distributeModel.isPending}>
+          <HardDrive size={16} /> {distributeModel.isPending ? "Distributing" : "Distribute Model"}
+        </button>
+        <span className="form-note">
+          {distributionResult ? JSON.stringify(distributionResult.result) : "Uses the selected machine and model"}
+        </span>
+      </form>
       <div className="split">
         <div className="panel">
           <h2>Candidate Preview</h2>
@@ -577,6 +673,49 @@ function RunsView({
   trials: Trial[];
   runLog?: ExperimentRunLog;
 }) {
+  const queryClient = useQueryClient();
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("fake");
+  const [benchmarkKind, setBenchmarkKind] = useState<BenchmarkKind>("serve");
+  const jobs = useQuery({
+    queryKey: ["jobs"],
+    queryFn: api.jobs,
+    refetchInterval: (query) => {
+      const latest = query.state.data?.[0];
+      return latest && ["queued", "running"].includes(latest.status) ? 3000 : false;
+    }
+  });
+  const latestJob = jobs.data?.[0] as JobRecord | undefined;
+  const latestJobLogs = useQuery({
+    queryKey: ["job-logs", latestJob?.id],
+    queryFn: () => api.jobLogs(latestJob?.id ?? ""),
+    enabled: Boolean(latestJob),
+    refetchInterval: latestJob && ["queued", "running"].includes(latestJob.status) ? 3000 : false
+  });
+  const createBenchmark = useMutation({
+    mutationFn: (formData: FormData) => {
+      if (!experiment) {
+        throw new Error("No experiment selected");
+      }
+      const runSpec = runSpecFromExperiment(experiment);
+      const requestRate = optionalNumberValue(formData.get("request_rate"));
+      return api.createBenchmarkJob({
+        run_spec: runSpec,
+        execution_mode: executionMode,
+        benchmark: {
+          run_spec: runSpec,
+          kind: benchmarkKind,
+          dataset_name: String(formData.get("dataset_name") ?? "random"),
+          input_len: numberValue(formData.get("input_len"), 1024),
+          output_len: numberValue(formData.get("output_len"), 256),
+          num_prompts: numberValue(formData.get("num_prompts"), 128),
+          request_rate: requestRate,
+          result_filename: `${experiment.id}-${benchmarkKind}.json`
+        }
+      });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] })
+  });
+
   return (
     <section className="stack">
       <header className="page-head">
@@ -591,10 +730,87 @@ function RunsView({
           <h2>Metrics</h2>
           <MetricsChart metrics={metrics} />
         </div>
+        <form
+          className="panel form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createBenchmark.mutate(new FormData(event.currentTarget));
+          }}
+        >
+          <label>
+            Execution
+            <select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as ExecutionMode)}>
+              <option value="fake">fake local</option>
+              <option value="remote_inline">real SSH inline</option>
+              <option value="remote_rq">real SSH via RQ</option>
+            </select>
+          </label>
+          <label>
+            Kind
+            <select value={benchmarkKind} onChange={(event) => setBenchmarkKind(event.target.value as BenchmarkKind)}>
+              <option value="serve">serve</option>
+              <option value="throughput">throughput</option>
+            </select>
+          </label>
+          <label>
+            Dataset
+            <input name="dataset_name" defaultValue="random" />
+          </label>
+          <label>
+            Prompts
+            <input name="num_prompts" type="number" min="1" defaultValue="128" />
+          </label>
+          <label>
+            Input Tokens
+            <input name="input_len" type="number" min="1" defaultValue="1024" />
+          </label>
+          <label>
+            Output Tokens
+            <input name="output_len" type="number" min="1" defaultValue="256" />
+          </label>
+          <label>
+            Request Rate
+            <input name="request_rate" type="number" min="0.1" step="0.1" placeholder="unlimited" />
+          </label>
+          <button className="primary form-action" disabled={!experiment || createBenchmark.isPending}>
+            <Play size={16} /> {createBenchmark.isPending ? "Submitting" : "Run Benchmark"}
+          </button>
+        </form>
+      </div>
+      <div className="split">
         <div className="panel">
-          <h2>Logs</h2>
+          <h2>Experiment Logs</h2>
           <pre>{(runLog?.lines ?? ["No experiment selected"]).join("\n")}</pre>
         </div>
+        <div className="panel">
+          <h2>Job Logs</h2>
+          <pre>{(latestJobLogs.data?.logs ?? latestJob?.logs ?? ["No benchmark job selected"]).join("\n")}</pre>
+        </div>
+      </div>
+      <div className="panel table-panel">
+        <h2>Benchmark Jobs</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Status</th>
+              <th>Progress</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(jobs.data ?? []).slice(0, 8).map((job) => (
+              <tr key={job.id}>
+                <td className="mono">{job.id}</td>
+                <td>
+                  <StatusPill status={job.status} />
+                </td>
+                <td>{Math.round(job.progress * 100)}%</td>
+                <td>{job.error ?? "none"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <div className="panel table-panel">
         <h2>Trials</h2>
@@ -695,14 +911,21 @@ function HistoryView({ experiments }: { experiments: Experiment[] }) {
 
 function ReportsView({ experiment }: { experiment?: Experiment }) {
   const queryClient = useQueryClient();
+  const [downloadResult, setDownloadResult] = useState("");
   const reportMutation = useMutation({
     mutationFn: () => api.generateReport(experiment?.id ?? "experiment-container"),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reports", experiment?.id] })
+  });
+  const downloadReport = useMutation({
+    mutationFn: ({ reportId, format }: { reportId: string; format: "markdown" | "pdf" | "docx" }) =>
+      api.downloadReport(reportId, format),
+    onSuccess: (result) => setDownloadResult(result.presigned_url || result.uri)
   });
   const reports = useQuery({
     queryKey: ["reports", experiment?.id],
     queryFn: () => api.reports(experiment?.id)
   });
+  const artifacts = useQuery({ queryKey: ["artifacts"], queryFn: api.artifacts });
 
   return (
     <section className="stack">
@@ -722,6 +945,7 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
               <th>Template</th>
               <th>Status</th>
               <th>Artifact</th>
+              <th>Download</th>
             </tr>
           </thead>
           <tbody>
@@ -732,6 +956,47 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
                   <StatusPill status={report.status} />
                 </td>
                 <td>{report.artifact_id ?? "pending"}</td>
+                <td>
+                  <div className="row-actions">
+                    {(["markdown", "pdf", "docx"] as const).map((format) => (
+                      <button
+                        className="icon-button"
+                        key={format}
+                        title={`Download ${format}`}
+                        onClick={() => downloadReport.mutate({ reportId: report.id, format })}
+                      >
+                        <Download size={14} />
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="panel">
+        <h2>Download Result</h2>
+        <code>{downloadResult || "No export requested"}</code>
+      </div>
+      <div className="panel table-panel">
+        <h2>Artifacts</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Name</th>
+              <th>URI</th>
+              <th>Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(artifacts.data ?? []).slice(0, 10).map((artifact) => (
+              <tr key={artifact.id}>
+                <td>{artifact.kind}</td>
+                <td>{artifact.name}</td>
+                <td className="mono">{artifact.uri}</td>
+                <td>{artifact.size_bytes}</td>
               </tr>
             ))}
           </tbody>

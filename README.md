@@ -3,9 +3,11 @@
 面向 AI 整机厂商的自动化模型推理测试、调优与报告平台。
 
 当前仓库包含一个 workshop-grade MVP 实现：FastAPI 后端、SQLAlchemy/Alembic
-数据模型、fake executor / fake plugin 业务闭环、数据库 demo seed，以及 React + Vite
+数据模型、AsyncSSH opt-in 远程执行、vLLM/SGLang benchmark command runner、
+S3/MinIO artifact 上传、LiteLLM 调参候选 provider、数据库 demo seed，以及 React + Vite
 工作台前端。
-当前继续按任务要求绕过真实 E2E/CI gate，优先推进本地 fake-backed 功能闭环。
+当前继续按任务要求绕过真实 E2E/CI gate。默认测试仍走安全 fake/dry-run 路径，真实
+SSH、远程 benchmark、对象存储和外部 LLM 都需要显式 opt-in。
 
 核心文档：
 
@@ -37,11 +39,15 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-本地依赖服务：
+Docker Compose 单机栈：
 
 ```bash
-docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml up --build
 ```
+
+该栈包含 backend API、RQ worker、frontend、PostgreSQL、Redis、MinIO，并初始化
+`inflab-artifacts` bucket。前端默认在 `http://127.0.0.1:8080`，API 在
+`http://127.0.0.1:8000`。
 
 后端开发服务：
 
@@ -49,6 +55,19 @@ docker compose -f deploy/compose.yaml up -d
 cd backend
 uv run uvicorn inflab.api.app:app --reload
 ```
+
+真实 SSH probe/bootstrap 是手动 opt-in 路径。先创建带凭据的 machine，然后显式传
+`dry_run=false`。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
+  -H 'content-type: application/json' \
+  -d '{"profile":"minimal","dry_run":false}'
+```
+
+该路径使用 AsyncSSH 连接目标机，支持 password/private key、sudo command、timeout、
+远端 cwd/env、SFTP upload/download，以及 benchmark stdout/stderr 流式读取。默认测试和
+demo seed 仍不打开真实 SSH 连接。
 
 使用数据库 demo 数据启动后端：
 
@@ -70,8 +89,10 @@ pnpm build
 ```
 
 当前前端只调用后端 API，不再导入本地 mock 数据。可直接操作数据库记录：新增机器、
-机器探测、dry-run bootstrap、注册 demo 模型、预览调参候选、创建实验、查看
-trial/log/metrics，并生成报告 artifact 记录。空库可在页面点击 `Seed DB`，或调用
+机器探测（dry-run 或真实 SSH）、bootstrap（dry-run 或真实 SSH）、注册/分发模型、
+预览调参候选、创建实验、提交 benchmark job（fake、remote inline、remote RQ）、
+轮询 job logs、查看 trial/log/metrics，并生成/导出报告 artifact 记录。空库可在页面点击
+`Seed DB`，或调用
 `POST /api/v1/dev/seed-demo-data`。
 如果后端不在默认 `http://127.0.0.1:8000`，可用 `VITE_API_BASE` 指向目标 API：
 
@@ -79,9 +100,18 @@ trial/log/metrics，并生成报告 artifact 记录。空库可在页面点击 `
 VITE_API_BASE=http://127.0.0.1:18000/api/v1 pnpm dev -- --port 5174
 ```
 
-真实推理仍不默认执行，但后端已有 vLLM benchmark command-plan 接口：
-`POST /api/v1/benchmarks/plan`。它生成 `vllm bench serve` / `vllm bench throughput`
-命令和结果路径，供后续接入真实远程执行器。
+真实推理仍不默认执行，但后端已有 vLLM/SGLang benchmark command-plan 和 opt-in
+远程执行路径：
+
+- `POST /api/v1/benchmarks/plan`：生成 vLLM/SGLang benchmark 命令和结果路径；
+- `POST /api/v1/benchmarks/jobs` with `execution_mode=remote_inline`：通过 AsyncSSH
+  直接运行；
+- `POST /api/v1/benchmarks/jobs` with `execution_mode=remote_rq`：通过 Redis/RQ worker
+  调度运行。
+
+外部 LLM candidate provider 使用 LiteLLM。默认 `INFLAB_LLM_PROVIDER=disabled`；启用
+OpenAI-compatible 或 Anthropic provider 后，候选参数仍会先经过 Pydantic schema 校验和
+启发式剪枝。
 
 ## E2E Status
 

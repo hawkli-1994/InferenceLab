@@ -1,15 +1,19 @@
 import pytest
 
+from inflab.artifacts import distribute_model, model_distribution_command
 from inflab.benchmark import (
     build_benchmark_command_plan,
     fake_benchmark_result,
     normalize_metrics,
     parse_vllm_bench_output,
+    run_remote_benchmark,
     validate_fair_comparison,
 )
 from inflab.executor import ExecutionContext, FakeExecutor
+from inflab.llm_provider import LiteLLMCandidateProvider
 from inflab.plugins import registry
-from inflab.reports import render_markdown_report
+from inflab.probe import parse_nvidia_smi_csv
+from inflab.reports import export_report, render_markdown_report
 from inflab.schemas import BenchmarkPlanCreate, FrameworkParams, RunSpec
 from inflab.security import decrypt_secret, encrypt_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
@@ -87,12 +91,95 @@ def test_vllm_benchmark_command_plan_and_parser() -> None:
     assert parsed["p99_ttft_ms"] == 230.0
 
 
+def test_sglang_benchmark_command_plan() -> None:
+    spec = run_spec("container").model_copy(update={"framework": "sglang"})
+    plan = build_benchmark_command_plan(
+        BenchmarkPlanCreate(run_spec=spec, kind="serve", num_prompts=8),
+        model_path="/data/models/qwen3",
+    )
+
+    assert "python -m sglang.bench_serving" in plan.bench_command
+    assert "--backend sglang" in plan.bench_command
+    assert plan.serve_command
+
+
+@pytest.mark.asyncio
+async def test_remote_benchmark_runner_streams_and_collects_result() -> None:
+    plan = build_benchmark_command_plan(
+        BenchmarkPlanCreate(run_spec=run_spec("container"), kind="throughput", num_prompts=8),
+        model_path="/data/models/qwen3",
+    )
+    executor = FakeExecutor()
+
+    result = await run_remote_benchmark(executor, plan)
+
+    assert result["status"] == "succeeded"
+    assert any("vllm bench throughput" in command.command for command in executor.commands)
+
+
+@pytest.mark.asyncio
+async def test_model_distribution_builds_real_remote_commands() -> None:
+    assert "huggingface-cli download" in model_distribution_command(
+        "huggingface", "Qwen/Qwen3", "/data/models/qwen3"
+    )
+    executor = FakeExecutor()
+
+    result = await distribute_model(
+        executor,
+        source="rsync",
+        cache_path="/cache/qwen",
+        target_path="/data/models/qwen",
+        expected_sha256="expected",
+    )
+
+    assert result["exit_code"] == 0
+    assert "rsync" in result["command"]
+
+
+def test_probe_parses_nvidia_smi_csv() -> None:
+    rows = parse_nvidia_smi_csv("0, NVIDIA A100, 81920, 550.54, 12.4")
+
+    assert rows == [
+        {
+            "index": 0,
+            "vendor": "nvidia",
+            "model": "NVIDIA A100",
+            "memory_mb": 81920.0,
+            "driver_version": "550.54",
+            "cuda_version": "12.4",
+        }
+    ]
+
+
 def test_tuning_candidates_are_valid_and_pruned() -> None:
     phases, candidates = plan_candidates(gpu_count=4, max_trials=3)
 
     assert phases[0] == "Observe"
     assert len(candidates) == 3
     assert heuristic_prune([FrameworkParams(max_model_len=1_000_000, max_num_seqs=2)]) == []
+
+
+def test_litellm_candidate_provider_validates_structured_output(settings, monkeypatch) -> None:
+    class Message:
+        content = '{"candidates":[{"gpu_memory_utilization":0.84,"max_num_seqs":64}]}'
+
+    class Choice:
+        message = Message()
+
+    class Response:
+        choices = [Choice()]
+
+    def fake_completion(**kwargs):
+        assert kwargs["response_format"] == {"type": "json_object"}
+        return Response()
+
+    monkeypatch.setattr("litellm.completion", fake_completion)
+    settings.llm_provider.provider = "openai_compatible"
+    settings.llm_provider.model = "openai/gpt-test"
+
+    candidates = LiteLLMCandidateProvider(settings.llm_provider).generate({})
+
+    assert candidates.candidates[0].gpu_memory_utilization == 0.84
 
 
 def test_report_redaction_and_secret_encryption(settings) -> None:
@@ -112,3 +199,5 @@ def test_report_redaction_and_secret_encryption(settings) -> None:
     )
     assert "secret-token" not in report
     assert "[REDACTED]" in report
+
+    assert export_report(report, output_format="markdown").decode() == report

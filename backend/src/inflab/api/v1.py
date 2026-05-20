@@ -8,13 +8,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from inflab.artifacts import distribution_plan, sha256_text
+from inflab.artifacts import distribute_model, distribution_plan, sha256_text
 from inflab.benchmark import (
     build_benchmark_command_plan,
     build_launch_command,
     fake_benchmark_result,
     normalize_metrics,
+    run_remote_benchmark,
 )
+from inflab.benchmark_artifacts import persist_remote_benchmark_artifacts
+from inflab.config import get_settings
 from inflab.db.models import (
     Artifact,
     BootstrapRun,
@@ -31,13 +34,17 @@ from inflab.db.models import (
 )
 from inflab.db.session import get_session
 from inflab.demo_data import seed_demo_data
-from inflab.executor import ExecutionContext, FakeExecutor
-from inflab.jobs import fake_queue
+from inflab.executor import AsyncSSHExecutor, ExecutionContext, FakeExecutor, SSHConnectionConfig
+from inflab.jobs import RQQueue, fake_queue
+from inflab.llm_provider import llm_candidates_or_empty
+from inflab.object_store import S3ObjectStore
 from inflab.plugins import registry
-from inflab.reports import render_markdown_report
+from inflab.probe import probe_remote_machine
+from inflab.reports import export_report, render_markdown_report
 from inflab.schemas import (
     ArtifactCreate,
     ArtifactRead,
+    ArtifactUploadText,
     BenchmarkCommandPlan,
     BenchmarkJobCreate,
     BenchmarkPlanCreate,
@@ -58,6 +65,8 @@ from inflab.schemas import (
     MachineUpdate,
     MetricsSummaryRead,
     ModelCreate,
+    ModelDistributeRead,
+    ModelDistributeRequest,
     ModelRead,
     Page,
     PluginInfo,
@@ -66,7 +75,7 @@ from inflab.schemas import (
     RuntimeMode,
     TrialRead,
 )
-from inflab.security import encrypt_secret, mask_secret
+from inflab.security import decrypt_secret, encrypt_secret, mask_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
 from inflab.tuning import plan_candidates
 
@@ -271,7 +280,22 @@ def _machine_gpu_count(machine: Machine) -> int:
 
 
 def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> ExperimentPlanRead:
-    phases, candidates = plan_candidates(gpu_count=gpu_count, max_trials=max_trials)
+    settings = get_settings()
+    llm_candidates = []
+    if settings.llm_provider.provider != "disabled":
+        llm_candidates = llm_candidates_or_empty(
+            settings.llm_provider,
+            {
+                "run_spec": run_spec.model_dump(mode="json"),
+                "gpu_count": gpu_count,
+                "max_trials": max_trials,
+            },
+        )
+    phases, candidates = plan_candidates(
+        gpu_count=gpu_count,
+        max_trials=max_trials,
+        llm_candidates=llm_candidates,
+    )
     planned = []
     for index, candidate in enumerate(candidates, start=1):
         candidate_spec = run_spec.model_copy(update={"framework_params": candidate})
@@ -288,9 +312,30 @@ def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> Experime
         candidates=planned,
         trial_count=len(planned),
         notes=[
-            "fake runner only; no SSH, GPU, NAS, Docker mutation, external LLM, or model download",
+            "default runner remains fake/dry-run unless remote execution is explicitly selected",
             "candidate params are Pydantic validated before launch command generation",
         ],
+    )
+
+
+def _ssh_executor_for_machine(machine: Machine) -> AsyncSSHExecutor:
+    if not machine.encrypted_credential:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="machine has no SSH credential configured",
+        )
+    settings = get_settings()
+    secret = decrypt_secret(machine.encrypted_credential, settings.secret_key)
+    return AsyncSSHExecutor(
+        SSHConnectionConfig(
+            host=machine.host,
+            port=machine.port,
+            username=machine.username,
+            credential_type=machine.credential_type,
+            secret=secret,
+            known_hosts_policy=settings.ssh.known_hosts_policy,
+            connect_timeout_seconds=settings.ssh.default_timeout_seconds,
+        )
     )
 
 
@@ -383,11 +428,22 @@ def delete_machine(machine_id: str, session: Session = Depends(get_session)) -> 
 
 
 @router.post("/machines/{machine_id}/probe", response_model=MachineSnapshotRead)
-def probe_machine(machine_id: str, session: Session = Depends(get_session)) -> MachineSnapshotRead:
+async def probe_machine(
+    machine_id: str,
+    dry_run: bool = Query(default=True),
+    session: Session = Depends(get_session),
+) -> MachineSnapshotRead:
     machine = session.get(Machine, machine_id)
     if machine is None:
         raise _not_found("machine")
-    profile = _fake_machine_profile(machine)
+    if dry_run:
+        profile = _fake_machine_profile(machine)
+    else:
+        profile = await probe_remote_machine(
+            _ssh_executor_for_machine(machine),
+            host=machine.host,
+            runtime_mode=machine.runtime_mode,
+        )
     fingerprint = _machine_fingerprint(profile)
     machine.machine_profile = profile
     machine.fingerprint = fingerprint
@@ -426,15 +482,20 @@ async def bootstrap_machine(
         raise _not_found("machine")
     steps = resolve_bootstrap_steps(payload.profile.value, payload.modules)
     ctx = ExecutionContext(machine_id=machine_id, dry_run=payload.dry_run)
-    results = await run_steps(steps, ctx, FakeExecutor())
+    executor = FakeExecutor() if payload.dry_run else _ssh_executor_for_machine(machine)
+    results = await run_steps(steps, ctx, executor)
+    failed_result = next((result for result in results if result.exit_code != 0), None)
+    run_status = "failed" if failed_result else "succeeded"
     run = BootstrapRun(
         machine_id=machine_id,
         profile=payload.profile.value,
-        status="succeeded",
+        status=run_status,
         modules=[step.id for step in steps],
         step_results=[result.model_dump(mode="json") for result in results],
+        failure_class="remote_step_failed" if failed_result else None,
+        failure_hint=failed_result.failure_hint if failed_result else None,
     )
-    machine.status = "ready"
+    machine.status = "ready" if run_status == "succeeded" else "bootstrap_failed"
     session.add(run)
     session.commit()
     session.refresh(run)
@@ -443,7 +504,8 @@ async def bootstrap_machine(
 
 @router.get("/bootstrap-runs", response_model=list[BootstrapRunRead])
 def list_bootstrap_runs(session: Session = Depends(get_session)) -> list[BootstrapRunRead]:
-    return [_bootstrap_read(row) for row in session.scalars(select(BootstrapRun)).all()]
+    rows = session.scalars(select(BootstrapRun).order_by(BootstrapRun.created_at.desc())).all()
+    return [_bootstrap_read(row) for row in rows]
 
 
 @router.get("/bootstrap-runs/{run_id}", response_model=BootstrapRunRead)
@@ -526,6 +588,41 @@ def model_distribution_plan(
     return distribution_plan(model.source, model.cache_path)
 
 
+@router.post("/models/{model_id}/distribute", response_model=ModelDistributeRead)
+async def distribute_model_to_machine(
+    model_id: str,
+    payload: ModelDistributeRequest,
+    session: Session = Depends(get_session),
+) -> ModelDistributeRead:
+    model = session.get(ModelRecord, model_id)
+    machine = session.get(Machine, payload.machine_id)
+    if model is None:
+        raise _not_found("model")
+    if machine is None:
+        raise _not_found("machine")
+    target_path = payload.target_path or model.cache_path
+    if payload.dry_run:
+        result: dict[str, Any] = {
+            **distribution_plan(model.source, model.cache_path),
+            "target_path": target_path,
+        }
+    else:
+        result = await distribute_model(
+            _ssh_executor_for_machine(machine),
+            source=model.source,
+            cache_path=model.cache_path,
+            target_path=target_path,
+            expected_sha256=model.sha256,
+        )
+    return ModelDistributeRead(
+        model_id=model.id,
+        machine_id=machine.id,
+        source=model.source,
+        target_path=target_path,
+        result=result,
+    )
+
+
 @router.post("/images", response_model=ImageRead, status_code=status.HTTP_201_CREATED)
 def create_image(payload: ImageCreate, session: Session = Depends(get_session)) -> ImageRead:
     image = ImageRecord(
@@ -569,8 +666,36 @@ def list_artifacts(session: Session = Depends(get_session)) -> list[ArtifactRead
     return [_artifact_read(row) for row in session.scalars(select(Artifact)).all()]
 
 
+@router.post(
+    "/artifacts/upload-text", response_model=ArtifactRead, status_code=status.HTTP_201_CREATED
+)
+def upload_text_artifact(
+    payload: ArtifactUploadText,
+    session: Session = Depends(get_session),
+) -> ArtifactRead:
+    settings = get_settings()
+    key = f"{payload.kind}/{sha256_text(payload.name)[:12]}-{payload.name}"
+    stored = S3ObjectStore(settings.object_storage).upload_bytes(
+        key,
+        payload.content.encode(),
+        content_type=payload.content_type,
+    )
+    artifact = Artifact(
+        kind=payload.kind,
+        name=payload.name,
+        uri=stored.uri,
+        sha256=stored.sha256,
+        size_bytes=stored.size_bytes,
+        metadata_json={**payload.metadata, "presigned_url": stored.presigned_url},
+    )
+    session.add(artifact)
+    session.commit()
+    session.refresh(artifact)
+    return _artifact_read(artifact)
+
+
 @router.post("/benchmarks/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)
-def create_benchmark_job(
+async def create_benchmark_job(
     payload: BenchmarkJobCreate,
     session: Session = Depends(get_session),
 ) -> JobRead:
@@ -578,6 +703,53 @@ def create_benchmark_job(
         raise _not_found("machine")
     if session.get(ModelRecord, payload.run_spec.model_id) is None:
         raise _not_found("model")
+
+    if payload.execution_mode == "remote_rq":
+        settings = get_settings()
+        benchmark_payload = (
+            payload.benchmark or BenchmarkPlanCreate(run_spec=payload.run_spec)
+        ).model_dump(mode="json")
+        return _job_read(
+            RQQueue(settings.redis).enqueue_importable(
+                session,
+                "benchmark",
+                "inflab.worker_tasks.run_remote_benchmark_job",
+                benchmark_payload,
+            )
+        )
+
+    if payload.execution_mode == "remote_inline":
+        model = session.get(ModelRecord, payload.run_spec.model_id)
+        machine = session.get(Machine, payload.run_spec.machine_id)
+        if model is None or machine is None:
+            raise _not_found("machine or model")
+        benchmark_payload = payload.benchmark or BenchmarkPlanCreate(run_spec=payload.run_spec)
+        plan = build_benchmark_command_plan(benchmark_payload, model_path=model.cache_path)
+        remote_result = await run_remote_benchmark(_ssh_executor_for_machine(machine), plan)
+        settings = get_settings()
+        job = JobRecord(
+            job_type="benchmark",
+            status="succeeded" if remote_result["status"] == "succeeded" else "failed",
+            progress=1.0,
+            logs=[str(line) for line in remote_result.get("logs", [])],
+            result={"plan": plan.model_dump(mode="json"), "remote_result": remote_result},
+            error=None
+            if remote_result["status"] == "succeeded"
+            else str(remote_result.get("error") or remote_result.get("stderr")),
+        )
+        session.add(job)
+        session.flush()
+        artifact_refs = persist_remote_benchmark_artifacts(
+            session,
+            settings=settings,
+            job=job,
+            plan=plan,
+            remote_result=remote_result,
+        )
+        job.result = {**job.result, "artifacts": artifact_refs}
+        session.commit()
+        session.refresh(job)
+        return _job_read(job)
 
     def handler() -> dict[str, Any]:
         result = fake_benchmark_result(payload.run_spec)
@@ -608,7 +780,8 @@ def plan_benchmark_command(
 
 @router.get("/jobs", response_model=list[JobRead])
 def list_jobs(session: Session = Depends(get_session)) -> list[JobRead]:
-    return [_job_read(row) for row in session.scalars(select(JobRecord)).all()]
+    rows = session.scalars(select(JobRecord).order_by(JobRecord.created_at.desc())).all()
+    return [_job_read(row) for row in rows]
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)
@@ -932,7 +1105,7 @@ def generate_report(
         size_bytes=len(markdown.encode()),
         metadata_json={
             "template": payload.template,
-            "formats": ["markdown", "pdf_stub", "docx_stub"],
+            "formats": ["markdown", "pdf", "docx"],
         },
     )
     session.add(artifact)
@@ -955,7 +1128,7 @@ def list_reports(
     experiment_id: str | None = None,
     session: Session = Depends(get_session),
 ) -> list[ReportRead]:
-    stmt = select(ReportRecord)
+    stmt = select(ReportRecord).order_by(ReportRecord.created_at.desc())
     if experiment_id is not None:
         stmt = stmt.where(ReportRecord.experiment_id == experiment_id)
     return [_report_read(row) for row in session.scalars(stmt).all()]
@@ -979,6 +1152,23 @@ def download_report(
     if report is None:
         raise _not_found("report")
     extension = {"markdown": "md", "pdf": "pdf", "docx": "docx"}[format]
+    if format != "markdown":
+        try:
+            data = export_report(report.markdown, output_format=format)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"report export toolchain unavailable: {exc}",
+            ) from exc
+        stored = S3ObjectStore(get_settings().object_storage).upload_bytes(
+            f"reports/{report.experiment_id}/{report.id}.{extension}",
+            data,
+            content_type={
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }[format],
+        )
+        return {"format": format, "uri": stored.uri, "presigned_url": stored.presigned_url or ""}
     return {
         "format": format,
         "uri": f"memory://reports/{report.experiment_id}/{report.id}.{extension}",

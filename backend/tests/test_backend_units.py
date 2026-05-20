@@ -1,6 +1,10 @@
 import pytest
 
-from inflab.artifacts import distribute_model, model_distribution_command
+from inflab.artifacts import (
+    distribute_model,
+    model_distribution_command,
+    model_verification_command,
+)
 from inflab.benchmark import (
     build_benchmark_command_plan,
     fake_benchmark_result,
@@ -134,6 +138,15 @@ async def test_model_distribution_builds_real_remote_commands() -> None:
 
     assert result["exit_code"] == 0
     assert "rsync" in result["command"]
+    assert "sha256 mismatch" in result["verify_command"]
+    assert "expected" in result["verify_command"]
+
+
+def test_model_verification_command_compares_expected_hash() -> None:
+    command = model_verification_command("/data/models/qwen", "abc123")
+
+    assert 'test "$actual" = abc123' in command
+    assert "sha256sum" in command
 
 
 def test_probe_parses_nvidia_smi_csv() -> None:

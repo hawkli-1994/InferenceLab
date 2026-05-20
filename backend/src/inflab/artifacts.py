@@ -65,6 +65,24 @@ def model_distribution_command(source: str, cache_path: str, target_path: str) -
     return f"test -e {quoted_cache}"
 
 
+def model_verification_command(target_path: str, expected_sha256: str | None = None) -> str:
+    quoted_target = shlex.quote(target_path)
+    if not expected_sha256:
+        return f"test -e {quoted_target}"
+    quoted_expected = shlex.quote(expected_sha256)
+    hash_command = (
+        f"if [ -d {quoted_target} ]; then "
+        f"find {quoted_target} -type f -print0 | sort -z | "
+        "xargs -0 sha256sum | sha256sum | awk '{print $1}'; "
+        f"else sha256sum {quoted_target} | awk '{{print $1}}'; fi"
+    )
+    return (
+        f"actual=$({hash_command}); "
+        f'test "$actual" = {quoted_expected} || '
+        f'(echo "sha256 mismatch: expected {expected_sha256} actual $actual" >&2; exit 1)'
+    )
+
+
 async def distribute_model(
     executor: RemoteExecutor,
     *,
@@ -75,12 +93,7 @@ async def distribute_model(
 ) -> dict[str, object]:
     command = model_distribution_command(source, cache_path, target_path)
     result = await executor.run(CommandRecord(command=command), timeout_seconds=3600)
-    verify_command = f"test -e {shlex.quote(target_path)}"
-    if expected_sha256:
-        verify_command = (
-            f"find {shlex.quote(target_path)} -type f -print0 | sort -z | "
-            "xargs -0 sha256sum | sha256sum"
-        )
+    verify_command = model_verification_command(target_path, expected_sha256)
     verify = await executor.run(CommandRecord(command=verify_command), timeout_seconds=600)
     return {
         "command": result.command.command,

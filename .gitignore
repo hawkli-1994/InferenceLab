@@ -26,8 +26,10 @@ id_rsa*
 
 # Local artifacts
 .DS_Store
+*.db
+*.sqlite
+*.sqlite3
 logs/
 reports/
 artifacts/
 data/
-

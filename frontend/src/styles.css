@@ -48,6 +48,18 @@ select {
   font-size: 12px;
 }
 
+.locale-switch {
+  margin: 0 8px 18px;
+  color: #c7d7d2;
+}
+
+.locale-switch select {
+  height: 34px;
+  color: #f2f7f5;
+  background: #173531;
+  border-color: #2b5751;
+}
+
 nav {
   display: grid;
   gap: 4px;
@@ -174,6 +186,11 @@ label {
   gap: 6px;
   color: #43514e;
   font-size: 13px;
+}
+
+label small {
+  color: #71817c;
+  line-height: 1.35;
 }
 
 input,

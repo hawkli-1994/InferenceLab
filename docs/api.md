@@ -10,8 +10,9 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 - Artifacts: report/log/snapshot/metrics/model/image references plus S3-compatible text upload.
 - Jobs: synchronous fake queue and Redis/RQ queue adapter with status, progress, logs, and result.
 - Benchmarks: RunSpec, fake benchmark job, normalized metrics, vLLM/SGLang command planning, opt-in remote inline/RQ execution.
-- Experiments: candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data.
+- Experiments: standard/intelligent mode candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data.
 - Plugins: runtime/framework/driver/model plugin registry.
+- AutoResearch: `GET /api/v1/autoresearch/integration-plan` exposes the Deli_AutoResearch intelligent-mode protocol boundary.
 - Reports: list/query, Markdown rendering, PDF/DOCX export through Pandoc/Typst when installed, artifact metadata, redaction.
 - Dev data: `POST /api/v1/dev/seed-demo-data` creates idempotent database-backed demo records.
 
@@ -76,10 +77,23 @@ uses `aws s3 sync`.
 configured S3-compatible bucket and stores an artifact row with URI, size, hash, and optional
 presigned URL metadata.
 
+## Experiment Modes
+
+Experiment planning accepts `mode`:
+
+- `standard`: default. Uses a deterministic software-driven matrix inspired by `llm_test_tools`,
+  with paired parallel/request points and progressive short-to-long context ordering.
+- `intelligent`: enables Agent/LLM candidate planning and reserves the Deli_AutoResearch protocol
+  boundary for long-horizon orchestration.
+
+`GET /api/v1/autoresearch/integration-plan` returns the intended state files, watchdog,
+stall-detection, and gate commands for the intelligent mode. The protocol is metadata-only in this
+slice; standard mode does not depend on it.
+
 ## LLM Candidate Provider
 
-Experiment planning can merge deterministic candidates with LiteLLM-generated candidates. The
-provider is disabled by default. Configure:
+Experiment planning can merge deterministic candidates with LiteLLM-generated candidates in
+`mode=intelligent`. The provider is disabled by default. Configure:
 
 - `INFLAB_LLM_PROVIDER=openai_compatible` or `anthropic`;
 - `INFLAB_LLM_MODEL`;

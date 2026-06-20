@@ -11,6 +11,7 @@ Read these documents before making architectural or product-shaping changes:
 - `modelbench_agent_requirements_2.md`: product requirements and MVP scope.
 - `modelbench_agent_tech_selection.md`: technical decisions, non-goals, and 10-week implementation map.
 - `docs/e2e_acceptance.md`: backend end-to-end acceptance method and GitHub Actions gate.
+- `docs/modes_i18n_autoresearch.md`: standard/intelligent execution modes, i18n, and Deli_AutoResearch integration.
 - `docs/agent_harness.md`: how this repository's Codex-oriented instruction harness is organized.
 
 The product philosophy is intentionally pragmatic: this is an internal workshop-grade tool, not an enterprise SaaS platform. Prefer fewer services, explicit data records, reproducible experiments, and useful error messages.
@@ -55,6 +56,8 @@ Default stack:
 - Database: PostgreSQL.
 - Artifacts: MinIO or S3-compatible object storage.
 - Frontend: React + Vite + TypeScript + TanStack Query + ECharts.
+- Execution modes: standard mode by default, intelligent mode for Agent/Deli_AutoResearch optimization.
+- i18n: Chinese and English UI support.
 - Reports: Jinja2 + Markdown + Pandoc + Typst.
 - Deployment: Docker Compose single instance for MVP.
 
@@ -73,6 +76,7 @@ Technologies explicitly deferred unless the user asks otherwise:
 Preserve these constraints in code and docs:
 
 - `container` and `bare_metal` runtime modes are first-class and must not become two unrelated code paths.
+- `standard` and `intelligent` experiment modes are first-class. Standard mode is deterministic and software-driven; intelligent mode may use Agent/LLM/Deli_AutoResearch.
 - Every experiment must be reproducible from recorded machine profile, model hash, runtime mode, framework version, framework params, prompt dataset, and launch command.
 - Remote machine changes must be modeled as explicit steps with `detect`, `apply`, and `verify` phases.
 - Remote step output must record command, exit code, stdout/stderr artifact location, changed files, snapshots, and failure hints.
@@ -84,6 +88,8 @@ Preserve these constraints in code and docs:
 ## Coding Rules
 
 - Keep implementation close to the documented MVP. Avoid broad framework introductions and speculative abstractions.
+- Keep standard mode usable without LLM or Deli_AutoResearch. Do not make the AutoResearch protocol a dependency of standard mode.
+- Add new frontend copy through `frontend/src/i18n.ts` so Chinese and English stay available.
 - Respect the backend-first sequence in `docs/task_list.md`. Do not create `frontend/` or add frontend dependencies until backend checks pass, and do not bypass the Phase 9 E2E gate unless explicitly instructed.
 - Use Pydantic models for external API payloads, plugin specs, benchmark results, and LLM structured outputs.
 - Keep shell commands in remote executor modules, not scattered across API handlers or workers.

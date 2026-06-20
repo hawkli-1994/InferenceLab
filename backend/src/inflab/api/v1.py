@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inflab.artifacts import distribute_model, distribution_plan, sha256_text
+from inflab.autoresearch_integration import autoresearch_integration_plan
 from inflab.benchmark import (
     build_benchmark_command_plan,
     build_launch_command,
@@ -51,6 +52,7 @@ from inflab.schemas import (
     BootstrapRequest,
     BootstrapRunRead,
     ExperimentCreate,
+    ExperimentMode,
     ExperimentPlanRead,
     ExperimentPlanRequest,
     ExperimentRead,
@@ -211,6 +213,7 @@ def _experiment_read(experiment: Experiment) -> ExperimentRead:
     return ExperimentRead(
         id=experiment.id,
         name=experiment.name,
+        mode=ExperimentMode(experiment.reproducibility.get("mode", "standard")),
         machine_id=experiment.machine_id,
         model_id=experiment.model_id,
         runtime_mode=RuntimeMode(experiment.runtime_mode),
@@ -279,10 +282,15 @@ def _machine_gpu_count(machine: Machine) -> int:
     return max(count, 1)
 
 
-def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> ExperimentPlanRead:
+def _experiment_plan(
+    run_spec: Any,
+    max_trials: int,
+    gpu_count: int,
+    mode: ExperimentMode = ExperimentMode.standard,
+) -> ExperimentPlanRead:
     settings = get_settings()
     llm_candidates = []
-    if settings.llm_provider.provider != "disabled":
+    if mode == ExperimentMode.intelligent and settings.llm_provider.provider != "disabled":
         llm_candidates = llm_candidates_or_empty(
             settings.llm_provider,
             {
@@ -295,6 +303,7 @@ def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> Experime
         gpu_count=gpu_count,
         max_trials=max_trials,
         llm_candidates=llm_candidates,
+        mode=mode.value,
     )
     planned = []
     for index, candidate in enumerate(candidates, start=1):
@@ -308,10 +317,17 @@ def _experiment_plan(run_spec: Any, max_trials: int, gpu_count: int) -> Experime
             }
         )
     return ExperimentPlanRead(
+        mode=mode,
         phases=[phase.value for phase in phases],
         candidates=planned,
         trial_count=len(planned),
         notes=[
+            "standard mode uses deterministic software-driven matrix planning"
+            if mode == ExperimentMode.standard
+            else (
+                "intelligent mode uses Agent/LLM candidate planning; "
+                "Deli_AutoResearch protocol integration is planned"
+            ),
             "default runner remains fake/dry-run unless remote execution is explicitly selected",
             "candidate params are Pydantic validated before launch command generation",
         ],
@@ -342,6 +358,11 @@ def _ssh_executor_for_machine(machine: Machine) -> AsyncSSHExecutor:
 @router.get("/openapi-ready", response_model=dict[str, str])
 def openapi_ready() -> dict[str, str]:
     return {"status": "ok", "schema": "/openapi.json"}
+
+
+@router.get("/autoresearch/integration-plan", response_model=dict[str, Any])
+def get_autoresearch_integration_plan() -> dict[str, Any]:
+    return autoresearch_integration_plan()
 
 
 @router.post("/dev/seed-demo-data", response_model=dict[str, int])
@@ -825,6 +846,7 @@ def plan_experiment(
         run_spec=payload.run_spec,
         max_trials=int(payload.budget.get("max_trials", 2)),
         gpu_count=_machine_gpu_count(machine),
+        mode=payload.mode,
     )
 
 
@@ -841,6 +863,7 @@ def create_experiment(
     launch_command = build_launch_command(payload.run_spec)
     reproducibility = {
         "machine_profile": machine.machine_profile,
+        "mode": payload.mode.value,
         "model_hash": model.sha256,
         "runtime_mode": payload.run_spec.runtime_mode.value,
         "framework_version": payload.run_spec.framework_version,
@@ -869,9 +892,11 @@ def create_experiment(
         run_spec=payload.run_spec,
         max_trials=int(payload.budget.get("max_trials", 2)),
         gpu_count=_machine_gpu_count(machine),
+        mode=payload.mode,
     )
     job_logs = [
         f"experiment {experiment.id} created",
+        f"mode: {payload.mode.value}",
         f"phase order: {', '.join(plan.phases)}",
         f"planned {plan.trial_count} fake trials",
     ]
@@ -931,6 +956,7 @@ def create_experiment(
     experiment.reproducibility = {
         **experiment.reproducibility,
         "agent_phases": plan.phases,
+        "mode": payload.mode.value,
         "candidate_count": plan.trial_count,
         "job_id": job.id,
     }
@@ -982,7 +1008,10 @@ def copy_experiment(experiment_id: str, session: Session = Depends(get_session))
         launch_command=experiment.launch_command,
         goal=experiment.goal,
         status="created",
-        reproducibility=experiment.reproducibility,
+        reproducibility={
+            **experiment.reproducibility,
+            "mode": experiment.reproducibility.get("mode", "standard"),
+        },
     )
     session.add(clone)
     session.commit()
@@ -1008,6 +1037,7 @@ def experiment_run_log(
         raise _not_found("experiment")
     lines = [
         f"experiment {experiment.id} {experiment.status}",
+        f"mode={experiment.reproducibility.get('mode', 'standard')}",
         f"runtime={experiment.runtime_mode} framework={experiment.framework}",
         f"launch={experiment.launch_command}",
     ]

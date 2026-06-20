@@ -65,7 +65,11 @@ export const api = {
   distributeModel: (modelId: string, payload: ModelDistributePayload) =>
     sendJson<ModelDistributeResult>(`/models/${modelId}/distribute`, payload),
   planExperiment: (payload: ExperimentCreatePayload) =>
-    sendJson<ExperimentPlan>("/experiments/plan", { run_spec: payload.run_spec, budget: payload.budget }),
+    sendJson<ExperimentPlan>("/experiments/plan", {
+      run_spec: payload.run_spec,
+      mode: payload.mode,
+      budget: payload.budget
+    }),
   createExperiment: (payload: ExperimentCreatePayload) =>
     sendJson<Experiment>("/experiments", payload),
   createBenchmarkJob: (payload: BenchmarkJobPayload) => sendJson<JobRecord>("/benchmarks/jobs", payload),

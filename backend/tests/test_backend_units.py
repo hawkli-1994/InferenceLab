@@ -5,6 +5,7 @@ from inflab.artifacts import (
     model_distribution_command,
     model_verification_command,
 )
+from inflab.autoresearch_integration import autoresearch_integration_plan
 from inflab.benchmark import (
     build_benchmark_command_plan,
     fake_benchmark_result,
@@ -21,7 +22,7 @@ from inflab.reports import export_report, render_markdown_report
 from inflab.schemas import BenchmarkPlanCreate, FrameworkParams, RunSpec
 from inflab.security import decrypt_secret, encrypt_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
-from inflab.tuning import heuristic_prune, plan_candidates
+from inflab.tuning import heuristic_prune, plan_candidates, standard_matrix
 
 
 def run_spec(runtime_mode: str = "container") -> RunSpec:
@@ -165,11 +166,29 @@ def test_probe_parses_nvidia_smi_csv() -> None:
 
 
 def test_tuning_candidates_are_valid_and_pruned() -> None:
-    phases, candidates = plan_candidates(gpu_count=4, max_trials=3)
+    phases, candidates = plan_candidates(gpu_count=4, max_trials=3, mode="intelligent")
 
     assert phases[0] == "Observe"
     assert len(candidates) == 3
     assert heuristic_prune([FrameworkParams(max_model_len=1_000_000, max_num_seqs=2)]) == []
+
+
+def test_standard_mode_uses_progressive_matrix() -> None:
+    phases, candidates = plan_candidates(gpu_count=8, max_trials=4, mode="standard")
+
+    assert phases[0] == "StandardMatrix"
+    assert [candidate.max_model_len for candidate in candidates] == sorted(
+        candidate.max_model_len for candidate in candidates
+    )
+    assert standard_matrix(gpu_count=8, max_trials=1)[0].max_num_seqs == 1
+
+
+def test_autoresearch_integration_plan_is_intelligent_mode_only() -> None:
+    plan = autoresearch_integration_plan()
+
+    assert plan["name"] == "Deli_AutoResearch"
+    assert plan["scope"] == "intelligent_mode_only"
+    assert "heartbeat_watchdog" in plan["protocols"]
 
 
 def test_litellm_candidate_provider_validates_structured_output(settings, monkeypatch) -> None:

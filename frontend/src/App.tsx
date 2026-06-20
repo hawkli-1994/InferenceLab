@@ -16,17 +16,19 @@ import {
   Server,
   TerminalSquare
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ElementType, ReactNode } from "react";
 
 import { api } from "./api";
+import { initialLocale, translate, type Locale, type MessageKey } from "./i18n";
 import type {
   BenchmarkKind,
   BootstrapRun,
   ExecutionMode,
   Experiment,
   ExperimentCreatePayload,
+  ExperimentMode,
   ExperimentPlan,
   ExperimentRunLog,
   JobRecord,
@@ -41,15 +43,31 @@ import type {
 
 type View = "machines" | "bootstrap" | "experiments" | "runs" | "compare" | "history" | "reports";
 
-const navItems: Array<{ id: View; label: string; icon: ElementType }> = [
-  { id: "machines", label: "Machines", icon: Server },
-  { id: "bootstrap", label: "Bootstrap", icon: Boxes },
-  { id: "experiments", label: "Create", icon: Plus },
-  { id: "runs", label: "Runs", icon: Activity },
-  { id: "compare", label: "Compare", icon: GitCompare },
-  { id: "history", label: "History", icon: ClipboardList },
-  { id: "reports", label: "Reports", icon: FileText }
+const navItems: Array<{ id: View; labelKey: MessageKey; icon: ElementType }> = [
+  { id: "machines", labelKey: "machines", icon: Server },
+  { id: "bootstrap", labelKey: "bootstrap", icon: Boxes },
+  { id: "experiments", labelKey: "create", icon: Plus },
+  { id: "runs", labelKey: "runs", icon: Activity },
+  { id: "compare", labelKey: "compare", icon: GitCompare },
+  { id: "history", labelKey: "history", icon: ClipboardList },
+  { id: "reports", labelKey: "reports", icon: FileText }
 ];
+
+type I18nState = {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  t: (key: MessageKey) => string;
+};
+
+const I18nContext = createContext<I18nState | null>(null);
+
+function useI18n() {
+  const value = useContext(I18nContext);
+  if (!value) {
+    throw new Error("I18nContext is not available");
+  }
+  return value;
+}
 
 function numberValue(value: FormDataEntryValue | null, fallback: number) {
   const parsed = Number(value);
@@ -91,6 +109,7 @@ function Shell({
   setView: (view: View) => void;
   children: ReactNode;
 }) {
+  const { locale, setLocale, t } = useI18n();
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -98,21 +117,29 @@ function Shell({
           <HardDrive size={24} />
           <div>
             <strong>InferenceLab</strong>
-            <span>ModelBench Agent</span>
+            <span>{t("appSubtitle")}</span>
           </div>
         </div>
+        <label className="locale-switch">
+          <span>{t("language")}</span>
+          <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+        </label>
         <nav>
           {navItems.map((item) => {
             const Icon = item.icon;
+            const label = t(item.labelKey);
             return (
               <button
                 key={item.id}
                 className={view === item.id ? "nav-item active" : "nav-item"}
-                title={item.label}
+                title={label}
                 onClick={() => setView(item.id)}
               >
                 <Icon size={18} />
-                <span>{item.label}</span>
+                <span>{label}</span>
               </button>
             );
           })}
@@ -124,6 +151,7 @@ function Shell({
 }
 
 function MachinesView({ machines }: { machines: Machine[] }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [probeDryRun, setProbeDryRun] = useState(true);
   const createMachine = useMutation({
@@ -160,8 +188,8 @@ function MachinesView({ machines }: { machines: Machine[] }) {
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Machine Pool</h1>
-          <p>SSH onboarding records, real probe snapshots, and current readiness.</p>
+          <h1>{t("machinePool")}</h1>
+          <p>{t("machinePoolDesc")}</p>
         </div>
         <div className="toolbar">
           <label className="check-row">
@@ -170,10 +198,10 @@ function MachinesView({ machines }: { machines: Machine[] }) {
               checked={probeDryRun}
               onChange={(event) => setProbeDryRun(event.target.checked)}
             />
-            Dry-run probe
+            {t("dryRunProbe")}
           </label>
           <button className="secondary" onClick={() => seedDemoData.mutate()} disabled={seedDemoData.isPending}>
-            <Database size={16} /> {seedDemoData.isPending ? "Seeding" : "Seed DB"}
+            <Database size={16} /> {seedDemoData.isPending ? t("seeding") : t("seedDb")}
           </button>
         </div>
       </header>
@@ -186,27 +214,27 @@ function MachinesView({ machines }: { machines: Machine[] }) {
           }}
         >
           <label>
-            Name
+            {t("name")}
             <input name="name" defaultValue="lab-a100-02" />
           </label>
           <label>
-            Host
+            {t("host")}
             <input name="host" defaultValue="10.0.0.11" />
           </label>
           <label>
-            User
+            {t("user")}
             <input name="username" defaultValue="seed" />
           </label>
           <label>
-            Port
+            {t("port")}
             <input name="port" type="number" min="1" max="65535" defaultValue="22" />
           </label>
           <label>
-            Password
+            {t("password")}
             <input name="secret" type="password" defaultValue="seed" />
           </label>
           <label>
-            Runtime
+            {t("runtime")}
             <select name="runtime_mode" defaultValue="both">
               <option value="both">container + bare metal</option>
               <option value="container">container</option>
@@ -214,7 +242,7 @@ function MachinesView({ machines }: { machines: Machine[] }) {
             </select>
           </label>
           <button className="primary form-action" disabled={createMachine.isPending}>
-            <Plus size={16} /> {createMachine.isPending ? "Adding" : "Add Machine"}
+            <Plus size={16} /> {createMachine.isPending ? t("adding") : t("addMachine")}
           </button>
           <span className="form-note">{createMachine.isError ? "API request failed" : ""}</span>
         </form>
@@ -222,12 +250,12 @@ function MachinesView({ machines }: { machines: Machine[] }) {
           <table>
             <thead>
               <tr>
-                <th>Machine</th>
-                <th>Host</th>
-                <th>Status</th>
-                <th>Runtime</th>
-                <th>Fingerprint</th>
-                <th>Action</th>
+                <th>{t("machines")}</th>
+                <th>{t("host")}</th>
+                <th>{t("status")}</th>
+                <th>{t("runtime")}</th>
+                <th>{t("fingerprint")}</th>
+                <th>{t("action")}</th>
               </tr>
             </thead>
             <tbody>
@@ -260,6 +288,7 @@ function MachinesView({ machines }: { machines: Machine[] }) {
 }
 
 function BootstrapView({ machines }: { machines: Machine[] }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [machineId, setMachineId] = useState("");
   const [profile, setProfile] = useState("full");
@@ -279,8 +308,8 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Bootstrap Profiles</h1>
-          <p>B1-B7 execution with structured detect, apply, and verify output.</p>
+          <h1>{t("bootstrapProfiles")}</h1>
+          <p>{t("bootstrapDesc")}</p>
         </div>
       </header>
       <div className="panel flow">
@@ -295,7 +324,7 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
         )}
       </div>
       <div className="panel">
-        <h2>Target</h2>
+        <h2>{t("target")}</h2>
         <div className="inline-controls">
           <select value={selectedMachineId} onChange={(event) => setMachineId(event.target.value)}>
             {machines.length === 0 ? (
@@ -316,22 +345,22 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
           </select>
           <label className="check-row">
             <input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} />
-            Dry-run
+            {t("dryRun")}
           </label>
           <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
-            <Play size={16} /> {runBootstrap.isPending ? "Running" : dryRun ? "Run Dry-Run" : "Run SSH"}
+            <Play size={16} /> {runBootstrap.isPending ? t("running") : dryRun ? t("runDryRun") : t("runSsh")}
           </button>
         </div>
       </div>
       <div className="panel table-panel">
-        <h2>Latest Step Output</h2>
+        <h2>{t("latestStepOutput")}</h2>
         <table>
           <thead>
             <tr>
-              <th>Module</th>
-              <th>Status</th>
-              <th>Changed Files</th>
-              <th>Failure Hint</th>
+              <th>{t("module")}</th>
+              <th>{t("status")}</th>
+              <th>{t("changedFiles")}</th>
+              <th>{t("failureHint")}</th>
             </tr>
           </thead>
           <tbody>
@@ -361,6 +390,7 @@ function ExperimentsView({
   models: ModelRecord[];
   experiments: Experiment[];
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [plan, setPlan] = useState<ExperimentPlan | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState("");
@@ -404,6 +434,7 @@ function ExperimentsView({
   });
   const buildPayload = (formData: FormData): ExperimentCreatePayload => ({
     name: String(formData.get("name") ?? "container baseline"),
+    mode: String(formData.get("mode") ?? "standard") as ExperimentMode,
     goal: String(formData.get("goal") ?? "max_throughput"),
     budget: { max_trials: numberValue(formData.get("max_trials"), 2) },
     run_spec: {
@@ -426,8 +457,8 @@ function ExperimentsView({
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Create Experiment</h1>
-          <p>Build a reproducible RunSpec before launching trials.</p>
+          <h1>{t("createExperiment")}</h1>
+          <p>{t("createExperimentDesc")}</p>
         </div>
       </header>
       <div className="split">
@@ -439,15 +470,15 @@ function ExperimentsView({
           }}
         >
           <label>
-            Model
+            {t("model")}
             <input name="model_name" defaultValue="Qwen3-32B" />
           </label>
           <label>
-            Cache Path
+            {t("cachePath")}
             <input name="cache_path" defaultValue="/data/models/qwen3-32b" />
           </label>
           <label>
-            Source
+            {t("source")}
             <select name="source" defaultValue="mock">
               <option value="mock">existing path</option>
               <option value="rsync">rsync mirror</option>
@@ -458,9 +489,9 @@ function ExperimentsView({
             </select>
           </label>
           <button className="primary form-action" disabled={createModel.isPending}>
-            <Database size={16} /> {createModel.isPending ? "Registering" : "Register Model"}
+            <Database size={16} /> {createModel.isPending ? t("registering") : t("registerModel")}
           </button>
-          <span className="form-note">{models.length} models registered</span>
+          <span className="form-note">{models.length} {t("modelsRegistered")}</span>
         </form>
         <form
           className="panel form-grid"
@@ -470,11 +501,11 @@ function ExperimentsView({
           }}
         >
           <label>
-            Name
+            {t("name")}
             <input name="name" defaultValue="container baseline" />
           </label>
           <label>
-            Machine
+            {t("machines")}
             <select name="machine_id" value={machineId} onChange={(event) => setSelectedMachineId(event.target.value)}>
               {machines.length === 0 ? (
                 <option value="">No machines</option>
@@ -488,7 +519,7 @@ function ExperimentsView({
             </select>
           </label>
           <label>
-            Model
+            {t("model")}
             <select name="model_id" value={modelId} onChange={(event) => setSelectedModelId(event.target.value)}>
               {models.length === 0 ? (
                 <option value="">No models</option>
@@ -502,48 +533,56 @@ function ExperimentsView({
             </select>
           </label>
           <label>
-            Framework
+            {t("framework")}
             <select name="framework" defaultValue="vllm">
               <option value="vllm">vLLM</option>
               <option value="sglang">SGLang</option>
             </select>
           </label>
           <label>
-            Runtime
+            {t("runtime")}
             <select name="runtime_mode" defaultValue="container">
               <option value="container">container</option>
               <option value="bare_metal">bare metal</option>
             </select>
           </label>
           <label>
-            Goal
+            {t("goal")}
             <select name="goal" defaultValue="max_throughput">
               <option value="max_throughput">maximum throughput</option>
               <option value="lowest_p99">lowest P99 latency</option>
             </select>
           </label>
           <label>
-            Framework Version
+            {t("mode")}
+            <select name="mode" defaultValue="standard">
+              <option value="standard">{t("standardMode")}</option>
+              <option value="intelligent">{t("intelligentMode")}</option>
+            </select>
+            <small>{t("standardModeHint")}</small>
+          </label>
+          <label>
+            {t("frameworkVersion")}
             <input name="framework_version" defaultValue="0.10.0" />
           </label>
           <label>
-            Prompt Dataset
+            {t("promptDataset")}
             <input name="prompt_dataset" defaultValue="random" />
           </label>
           <label>
-            Tensor Parallel
+            {t("tensorParallel")}
             <input name="tensor_parallel_size" type="number" min="1" defaultValue="4" />
           </label>
           <label>
-            GPU Memory
+            {t("gpuMemory")}
             <input name="gpu_memory_utilization" type="number" min="0.1" max="1" step="0.01" defaultValue="0.88" />
           </label>
           <label>
-            Max Seqs
+            {t("maxSeqs")}
             <input name="max_num_seqs" type="number" min="1" defaultValue="128" />
           </label>
           <label>
-            Max Trials
+            {t("maxTrials")}
             <input name="max_trials" type="number" min="1" max="8" defaultValue="2" />
           </label>
           <div className="form-actions">
@@ -558,10 +597,10 @@ function ExperimentsView({
                 }
               }}
             >
-              <RotateCw size={16} /> {planExperiment.isPending ? "Planning" : "Preview"}
+              <RotateCw size={16} /> {planExperiment.isPending ? t("planning") : t("preview")}
             </button>
             <button className="primary" disabled={!machineId || !modelId || createExperiment.isPending}>
-              <TerminalSquare size={16} /> {createExperiment.isPending ? "Creating" : "Create"}
+              <TerminalSquare size={16} /> {createExperiment.isPending ? t("creating") : t("create")}
             </button>
           </div>
         </form>
@@ -574,7 +613,7 @@ function ExperimentsView({
         }}
       >
         <label>
-          Distribution Target
+          {t("distributionTarget")}
           <input name="target_path" placeholder="default model cache path" />
         </label>
         <label className="check-row">
@@ -583,10 +622,10 @@ function ExperimentsView({
             checked={distributeDryRun}
             onChange={(event) => setDistributeDryRun(event.target.checked)}
           />
-          Dry-run distribution
+          {t("dryRunDistribution")}
         </label>
         <button className="secondary form-action" disabled={!machineId || !modelId || distributeModel.isPending}>
-          <HardDrive size={16} /> {distributeModel.isPending ? "Distributing" : "Distribute Model"}
+          <HardDrive size={16} /> {distributeModel.isPending ? t("distributing") : t("distributeModel")}
         </button>
         <span className="form-note">
           {distributionResult ? JSON.stringify(distributionResult.result) : "Uses the selected machine and model"}
@@ -594,24 +633,26 @@ function ExperimentsView({
       </form>
       <div className="split">
         <div className="panel">
-          <h2>Candidate Preview</h2>
+          <h2>{t("candidatePreview")}</h2>
           <pre>{JSON.stringify(plan ?? experiments[0]?.reproducibility ?? {}, null, 2)}</pre>
         </div>
         <div className="panel table-panel">
-          <h2>Recent Experiments</h2>
+          <h2>{t("recentExperiments")}</h2>
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Runtime</th>
-                <th>Status</th>
-                <th>Candidates</th>
+                <th>{t("name")}</th>
+                <th>{t("mode")}</th>
+                <th>{t("runtime")}</th>
+                <th>{t("status")}</th>
+                <th>{t("candidates")}</th>
               </tr>
             </thead>
             <tbody>
               {experiments.slice(0, 5).map((experiment) => (
                 <tr key={experiment.id}>
                   <td>{experiment.name}</td>
+                  <td>{experiment.mode}</td>
                   <td>{experiment.runtime_mode}</td>
                   <td>
                     <StatusPill status={experiment.status} />
@@ -673,6 +714,7 @@ function RunsView({
   trials: Trial[];
   runLog?: ExperimentRunLog;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("fake");
   const [benchmarkKind, setBenchmarkKind] = useState<BenchmarkKind>("serve");
@@ -720,14 +762,15 @@ function RunsView({
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Experiment Run</h1>
-          <p>Trials, logs, normalized metrics, and launch command.</p>
+          <h1>{t("experimentRun")}</h1>
+          <p>{t("experimentRunDesc")}</p>
+          {experiment ? <small>{t("mode")}: {experiment.mode}</small> : null}
         </div>
         {experiment ? <StatusPill status={experiment.status} /> : null}
       </header>
       <div className="split">
         <div className="panel">
-          <h2>Metrics</h2>
+          <h2>{t("metrics")}</h2>
           <MetricsChart metrics={metrics} />
         </div>
         <form
@@ -738,7 +781,7 @@ function RunsView({
           }}
         >
           <label>
-            Execution
+            {t("execution")}
             <select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as ExecutionMode)}>
               <option value="fake">fake local</option>
               <option value="remote_inline">real SSH inline</option>
@@ -746,56 +789,56 @@ function RunsView({
             </select>
           </label>
           <label>
-            Kind
+            {t("kind")}
             <select value={benchmarkKind} onChange={(event) => setBenchmarkKind(event.target.value as BenchmarkKind)}>
               <option value="serve">serve</option>
               <option value="throughput">throughput</option>
             </select>
           </label>
           <label>
-            Dataset
+            {t("dataset")}
             <input name="dataset_name" defaultValue="random" />
           </label>
           <label>
-            Prompts
+            {t("prompts")}
             <input name="num_prompts" type="number" min="1" defaultValue="128" />
           </label>
           <label>
-            Input Tokens
+            {t("inputTokens")}
             <input name="input_len" type="number" min="1" defaultValue="1024" />
           </label>
           <label>
-            Output Tokens
+            {t("outputTokens")}
             <input name="output_len" type="number" min="1" defaultValue="256" />
           </label>
           <label>
-            Request Rate
+            {t("requestRate")}
             <input name="request_rate" type="number" min="0.1" step="0.1" placeholder="unlimited" />
           </label>
           <button className="primary form-action" disabled={!experiment || createBenchmark.isPending}>
-            <Play size={16} /> {createBenchmark.isPending ? "Submitting" : "Run Benchmark"}
+            <Play size={16} /> {createBenchmark.isPending ? t("submitting") : t("runBenchmark")}
           </button>
         </form>
       </div>
       <div className="split">
         <div className="panel">
-          <h2>Experiment Logs</h2>
+          <h2>{t("experimentLogs")}</h2>
           <pre>{(runLog?.lines ?? ["No experiment selected"]).join("\n")}</pre>
         </div>
         <div className="panel">
-          <h2>Job Logs</h2>
+          <h2>{t("jobLogs")}</h2>
           <pre>{(latestJobLogs.data?.logs ?? latestJob?.logs ?? ["No benchmark job selected"]).join("\n")}</pre>
         </div>
       </div>
       <div className="panel table-panel">
-        <h2>Benchmark Jobs</h2>
+        <h2>{t("benchmarkJobs")}</h2>
         <table>
           <thead>
             <tr>
               <th>Job</th>
-              <th>Status</th>
-              <th>Progress</th>
-              <th>Error</th>
+              <th>{t("status")}</th>
+              <th>{t("progress")}</th>
+              <th>{t("error")}</th>
             </tr>
           </thead>
           <tbody>
@@ -813,14 +856,14 @@ function RunsView({
         </table>
       </div>
       <div className="panel table-panel">
-        <h2>Trials</h2>
+        <h2>{t("trials")}</h2>
         <table>
           <thead>
             <tr>
               <th>#</th>
-              <th>Status</th>
-              <th>Params</th>
-              <th>Command</th>
+              <th>{t("status")}</th>
+              <th>{t("params")}</th>
+              <th>{t("command")}</th>
             </tr>
           </thead>
           <tbody>
@@ -838,7 +881,7 @@ function RunsView({
         </table>
       </div>
       <div className="panel">
-        <h2>Launch Command</h2>
+        <h2>{t("launchCommand")}</h2>
         <code>{experiment?.launch_command ?? "No experiment selected"}</code>
       </div>
     </section>
@@ -846,6 +889,7 @@ function RunsView({
 }
 
 function CompareView({ experiments, metrics }: { experiments: Experiment[]; metrics: MetricsSummary[] }) {
+  const { t } = useI18n();
   const container = experiments.find((experiment) => experiment.runtime_mode === "container");
   const bare = experiments.find((experiment) => experiment.runtime_mode === "bare_metal");
   return (
@@ -854,6 +898,7 @@ function CompareView({ experiments, metrics }: { experiments: Experiment[]; metr
         <div>
           <h1>Container vs Bare Metal</h1>
           <p>Same machine, model hash, prompts, benchmark version, and parameter space.</p>
+          <small>{t("standardMode")} / {t("intelligentMode")}</small>
         </div>
       </header>
       <div className="panel comparison">
@@ -871,29 +916,32 @@ function CompareView({ experiments, metrics }: { experiments: Experiment[]; metr
 }
 
 function HistoryView({ experiments }: { experiments: Experiment[] }) {
+  const { t } = useI18n();
   return (
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Experiment History</h1>
-          <p>Reproducible runs and past benchmark baselines.</p>
+          <h1>{t("historyTitle")}</h1>
+          <p>{t("historyDesc")}</p>
         </div>
       </header>
       <div className="panel table-panel">
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Runtime</th>
-              <th>Framework</th>
-              <th>Prompt Set</th>
-              <th>Status</th>
+              <th>{t("name")}</th>
+              <th>{t("mode")}</th>
+              <th>{t("runtime")}</th>
+              <th>{t("framework")}</th>
+              <th>{t("promptDataset")}</th>
+              <th>{t("status")}</th>
             </tr>
           </thead>
           <tbody>
             {experiments.map((experiment) => (
               <tr key={experiment.id}>
                 <td>{experiment.name}</td>
+                <td>{experiment.mode}</td>
                 <td>{experiment.runtime_mode}</td>
                 <td>{experiment.framework}</td>
                 <td>{experiment.prompt_dataset}</td>
@@ -910,6 +958,7 @@ function HistoryView({ experiments }: { experiments: Experiment[] }) {
 }
 
 function ReportsView({ experiment }: { experiment?: Experiment }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [downloadResult, setDownloadResult] = useState("");
   const reportMutation = useMutation({
@@ -931,21 +980,21 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
     <section className="stack">
       <header className="page-head">
         <div>
-          <h1>Reports</h1>
-          <p>Markdown source with PDF/DOCX artifact interfaces.</p>
+          <h1>{t("reportTitle")}</h1>
+          <p>{t("reportDesc")}</p>
         </div>
         <button className="primary" disabled={!experiment || reportMutation.isPending} onClick={() => reportMutation.mutate()}>
-          <FileText size={16} /> Generate
+          <FileText size={16} /> {t("generate")}
         </button>
       </header>
       <div className="panel table-panel">
         <table>
           <thead>
             <tr>
-              <th>Template</th>
-              <th>Status</th>
-              <th>Artifact</th>
-              <th>Download</th>
+              <th>{t("template")}</th>
+              <th>{t("status")}</th>
+              <th>{t("artifact")}</th>
+              <th>{t("download")}</th>
             </tr>
           </thead>
           <tbody>
@@ -976,18 +1025,18 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
         </table>
       </div>
       <div className="panel">
-        <h2>Download Result</h2>
+        <h2>{t("downloadResult")}</h2>
         <code>{downloadResult || "No export requested"}</code>
       </div>
       <div className="panel table-panel">
-        <h2>Artifacts</h2>
+        <h2>{t("artifacts")}</h2>
         <table>
           <thead>
             <tr>
-              <th>Kind</th>
-              <th>Name</th>
-              <th>URI</th>
-              <th>Size</th>
+              <th>{t("kind")}</th>
+              <th>{t("name")}</th>
+              <th>{t("uri")}</th>
+              <th>{t("size")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1007,6 +1056,7 @@ function ReportsView({ experiment }: { experiment?: Experiment }) {
 }
 
 export function App() {
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale());
   const [view, setView] = useState<View>("machines");
   const machines = useQuery({ queryKey: ["machines"], queryFn: api.machines });
   const models = useQuery({ queryKey: ["models"], queryFn: api.models });
@@ -1027,31 +1077,44 @@ export function App() {
     queryFn: () => api.runLog(activeExperiment?.id ?? ""),
     enabled: Boolean(activeExperiment)
   });
+  const i18n = useMemo(
+    () => ({
+      locale,
+      setLocale: (nextLocale: Locale) => {
+        window.localStorage.setItem("inflab-locale", nextLocale);
+        setLocaleState(nextLocale);
+      },
+      t: (key: MessageKey) => translate(locale, key)
+    }),
+    [locale]
+  );
 
   return (
-    <Shell view={view} setView={setView}>
-      {view === "machines" ? <MachinesView machines={machines.data ?? []} /> : null}
-      {view === "bootstrap" ? <BootstrapView machines={machines.data ?? []} /> : null}
-      {view === "experiments" ? (
-        <ExperimentsView
-          machines={machines.data ?? []}
-          models={models.data ?? []}
-          experiments={experiments.data ?? []}
-        />
-      ) : null}
-      {view === "runs" ? (
-        <RunsView
-          experiment={activeExperiment}
-          metrics={metrics.data ?? []}
-          trials={trials.data ?? []}
-          runLog={runLog.data}
-        />
-      ) : null}
-      {view === "compare" ? (
-        <CompareView experiments={experiments.data ?? []} metrics={metrics.data ?? []} />
-      ) : null}
-      {view === "history" ? <HistoryView experiments={experiments.data ?? []} /> : null}
-      {view === "reports" ? <ReportsView experiment={activeExperiment} /> : null}
-    </Shell>
+    <I18nContext.Provider value={i18n}>
+      <Shell view={view} setView={setView}>
+        {view === "machines" ? <MachinesView machines={machines.data ?? []} /> : null}
+        {view === "bootstrap" ? <BootstrapView machines={machines.data ?? []} /> : null}
+        {view === "experiments" ? (
+          <ExperimentsView
+            machines={machines.data ?? []}
+            models={models.data ?? []}
+            experiments={experiments.data ?? []}
+          />
+        ) : null}
+        {view === "runs" ? (
+          <RunsView
+            experiment={activeExperiment}
+            metrics={metrics.data ?? []}
+            trials={trials.data ?? []}
+            runLog={runLog.data}
+          />
+        ) : null}
+        {view === "compare" ? (
+          <CompareView experiments={experiments.data ?? []} metrics={metrics.data ?? []} />
+        ) : null}
+        {view === "history" ? <HistoryView experiments={experiments.data ?? []} /> : null}
+        {view === "reports" ? <ReportsView experiment={activeExperiment} /> : null}
+      </Shell>
+    </I18nContext.Provider>
   );
 }

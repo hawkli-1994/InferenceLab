@@ -2,6 +2,7 @@ export type RuntimeMode = "container" | "bare_metal" | "both";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 export type ExecutionMode = "fake" | "remote_inline" | "remote_rq";
 export type BenchmarkKind = "serve" | "throughput";
+export type ExperimentMode = "standard" | "intelligent";
 
 export interface Machine {
   id: string;
@@ -149,6 +150,7 @@ export interface JobRecord {
 
 export interface ExperimentCreatePayload {
   name: string;
+  mode: ExperimentMode;
   run_spec: RunSpec;
   goal: string;
   budget: {
@@ -164,6 +166,7 @@ export interface ExperimentCandidate {
 }
 
 export interface ExperimentPlan {
+  mode: ExperimentMode;
   phases: string[];
   candidates: ExperimentCandidate[];
   trial_count: number;
@@ -173,6 +176,7 @@ export interface ExperimentPlan {
 export interface Experiment {
   id: string;
   name: string;
+  mode: ExperimentMode;
   machine_id: string;
   model_id: string;
   runtime_mode: RuntimeMode;

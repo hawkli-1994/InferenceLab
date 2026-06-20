@@ -13,6 +13,7 @@ from inflab.schemas import FrameworkParams
 
 
 class AgentPhase(StrEnum):
+    standard_matrix = "StandardMatrix"
     observe = "Observe"
     plan = "Plan"
     validate = "Validate"
@@ -53,6 +54,41 @@ def random_search(seed: int = 7, count: int = 2) -> list[FrameworkParams]:
     ]
 
 
+def standard_matrix(
+    *,
+    gpu_count: int = 1,
+    max_trials: int = 8,
+    io_points: list[tuple[int, int]] | None = None,
+) -> list[FrameworkParams]:
+    """Software-driven matrix inspired by llm_test_tools progressive runs."""
+
+    default_io_points = [(512, 512), (2048, 2048), (16384, 16384), (50000, 50000)]
+    io_pairs = io_points or default_io_points
+    requested_pairs = [(1, 1), (4, 4), (8, 8), (16, 16), (32, 32)]
+    parallel_pairs: list[tuple[int, int]] = []
+    for parallel_size, num_prompts in requested_pairs:
+        bounded_parallel = min(max(gpu_count, 1), parallel_size)
+        pair = (bounded_parallel, num_prompts)
+        if pair not in parallel_pairs:
+            parallel_pairs.append(pair)
+
+    candidates: list[FrameworkParams] = []
+    for parallel_size, num_prompts in parallel_pairs:
+        for input_len, output_len in io_pairs:
+            required_context = input_len + output_len + 16
+            candidates.append(
+                FrameworkParams(
+                    tensor_parallel_size=max(parallel_size, 1),
+                    gpu_memory_utilization=0.88,
+                    max_model_len=required_context,
+                    max_num_seqs=num_prompts,
+                    max_num_batched_tokens=min(max(required_context * num_prompts, 512), 131072),
+                )
+            )
+    candidates.sort(key=lambda candidate: (candidate.max_model_len, candidate.max_num_seqs))
+    return candidates[:max_trials]
+
+
 class MockLLMCandidateProvider:
     def generate(self, context: dict[str, object]) -> CandidateSet:
         raw = {
@@ -80,7 +116,14 @@ def plan_candidates(
     gpu_count: int = 1,
     max_trials: int = 2,
     llm_candidates: list[FrameworkParams] | None = None,
+    mode: str = "standard",
 ) -> tuple[list[AgentPhase], list[FrameworkParams]]:
+    if mode == "standard":
+        return (
+            [AgentPhase.standard_matrix, AgentPhase.validate, AgentPhase.done],
+            standard_matrix(gpu_count=gpu_count, max_trials=max_trials),
+        )
+
     phases = [
         AgentPhase.observe,
         AgentPhase.plan,
@@ -113,11 +156,13 @@ def run_agent_tuning_loop(
     max_trials: int,
     runner: Callable[[FrameworkParams], dict[str, object]],
     llm_candidates: list[FrameworkParams] | None = None,
+    mode: str = "intelligent",
 ) -> dict[str, object]:
     phases, candidates = plan_candidates(
         gpu_count=gpu_count,
         max_trials=max_trials,
         llm_candidates=llm_candidates,
+        mode=mode,
     )
     observations = []
     best: dict[str, object] | None = None

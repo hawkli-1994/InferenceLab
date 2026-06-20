@@ -15,6 +15,7 @@ SSH、远程 benchmark、对象存储和外部 LLM 都需要显式 opt-in。
 - [技术选型文档](modelbench_agent_tech_selection.md)
 - [任务清单](docs/task_list.md)
 - [后端 E2E 验收方案](docs/e2e_acceptance.md)
+- [双模式、国际化与 AutoResearch 方案](docs/modes_i18n_autoresearch.md)
 - [Agent Harness](docs/agent_harness.md)
 
 ## Agent Harness
@@ -26,6 +27,8 @@ SSH、远程 benchmark、对象存储和外部 LLM 都需要显式 opt-in。
 - Backend: FastAPI + PostgreSQL + Redis/RQ
 - Remote Executor: AsyncSSH + rsync + 幂等 Step
 - Frontend: React + Vite + TypeScript + ECharts
+- Modes: 标准模式（默认）+ 智能模式（Agent/Deli_AutoResearch）
+- i18n: 中文 + English
 - Reports: Markdown + Pandoc + Typst
 - Deployment: Docker Compose 单实例
 

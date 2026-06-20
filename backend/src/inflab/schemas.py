@@ -15,6 +15,11 @@ class RuntimeMode(StrEnum):
     both = "both"
 
 
+class ExperimentMode(StrEnum):
+    standard = "standard"
+    intelligent = "intelligent"
+
+
 class JobStatus(StrEnum):
     queued = "queued"
     running = "running"
@@ -316,12 +321,14 @@ class JobRead(BaseModel):
 class ExperimentCreate(BaseModel):
     name: str
     run_spec: RunSpec
+    mode: ExperimentMode = ExperimentMode.standard
     goal: str = "max_throughput"
     budget: dict[str, Any] = Field(default_factory=lambda: {"max_trials": 2})
 
 
 class ExperimentPlanRequest(BaseModel):
     run_spec: RunSpec
+    mode: ExperimentMode = ExperimentMode.standard
     budget: dict[str, Any] = Field(default_factory=lambda: {"max_trials": 2})
 
 
@@ -333,6 +340,7 @@ class ExperimentCandidateRead(BaseModel):
 
 
 class ExperimentPlanRead(BaseModel):
+    mode: ExperimentMode
     phases: list[str]
     candidates: list[ExperimentCandidateRead]
     trial_count: int
@@ -342,6 +350,7 @@ class ExperimentPlanRead(BaseModel):
 class ExperimentRead(BaseModel):
     id: str
     name: str
+    mode: ExperimentMode
     machine_id: str
     model_id: str
     runtime_mode: RuntimeMode

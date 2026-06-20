@@ -167,7 +167,8 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     )
     assert plan_response.status_code == 200
     plan = plan_response.json()
-    assert plan["phases"][:3] == ["Observe", "Plan", "Validate"]
+    assert plan["mode"] == "standard"
+    assert plan["phases"][:3] == ["StandardMatrix", "Validate", "Done"]
     assert plan["trial_count"] == 3
     assert "vllm serve" in plan["candidates"][0]["launch_command"]
 
@@ -178,6 +179,8 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     assert experiment_response.status_code == 201
     experiment = experiment_response.json()
     reproducibility = experiment["reproducibility"]
+    assert experiment["mode"] == "standard"
+    assert reproducibility["mode"] == "standard"
     assert reproducibility["machine_profile"]["host"] == "10.0.0.10"
     assert reproducibility["model_hash"] == model["sha256"]
     assert reproducibility["runtime_mode"] == "container"

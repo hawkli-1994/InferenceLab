@@ -1,5 +1,6 @@
 import pytest
 
+from inflab.agent_executor import intelligent_worker_prompt, pi_agent_executor_plan
 from inflab.artifacts import (
     distribute_model,
     model_distribution_command,
@@ -14,6 +15,7 @@ from inflab.benchmark import (
     run_remote_benchmark,
     validate_fair_comparison,
 )
+from inflab.config import AgentExecutorSettings
 from inflab.executor import ExecutionContext, FakeExecutor
 from inflab.llm_provider import LiteLLMCandidateProvider
 from inflab.plugins import registry
@@ -184,11 +186,26 @@ def test_standard_mode_uses_progressive_matrix() -> None:
 
 
 def test_autoresearch_integration_plan_is_intelligent_mode_only() -> None:
-    plan = autoresearch_integration_plan()
+    executor = pi_agent_executor_plan(AgentExecutorSettings())
+    plan = autoresearch_integration_plan(executor)
 
     assert plan["name"] == "Deli_AutoResearch"
     assert plan["scope"] == "intelligent_mode_only"
+    assert plan["worker_executor"]["provider"] == "pi"
     assert "heartbeat_watchdog" in plan["protocols"]
+
+
+def test_pi_agent_worker_prompt_is_bounded() -> None:
+    prompt = intelligent_worker_prompt(
+        task_spec_path="state/task_spec.md",
+        progress_path="state/progress.json",
+        directions_path="state/directions_tried.json",
+        completion_criteria="write one finding",
+    )
+
+    assert "Deli_AutoResearch worker iteration" in prompt
+    assert "Do not ask the user questions" in prompt
+    assert "one bounded iteration" in prompt
 
 
 def test_litellm_candidate_provider_validates_structured_output(settings, monkeypatch) -> None:

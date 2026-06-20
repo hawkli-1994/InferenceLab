@@ -56,7 +56,7 @@ Default stack:
 - Database: PostgreSQL.
 - Artifacts: MinIO or S3-compatible object storage.
 - Frontend: React + Vite + TypeScript + TanStack Query + ECharts.
-- Execution modes: standard mode by default, intelligent mode for Agent/Deli_AutoResearch optimization.
+- Execution modes: standard mode by default, intelligent mode for Agent/Deli_AutoResearch optimization with Pi agent as worker executor.
 - i18n: Chinese and English UI support.
 - Reports: Jinja2 + Markdown + Pandoc + Typst.
 - Deployment: Docker Compose single instance for MVP.
@@ -76,7 +76,7 @@ Technologies explicitly deferred unless the user asks otherwise:
 Preserve these constraints in code and docs:
 
 - `container` and `bare_metal` runtime modes are first-class and must not become two unrelated code paths.
-- `standard` and `intelligent` experiment modes are first-class. Standard mode is deterministic and software-driven; intelligent mode may use Agent/LLM/Deli_AutoResearch.
+- `standard` and `intelligent` experiment modes are first-class. Standard mode is deterministic and software-driven; intelligent mode may use Agent/LLM/Deli_AutoResearch with Pi agent as the bounded worker executor.
 - Every experiment must be reproducible from recorded machine profile, model hash, runtime mode, framework version, framework params, prompt dataset, and launch command.
 - Remote machine changes must be modeled as explicit steps with `detect`, `apply`, and `verify` phases.
 - Remote step output must record command, exit code, stdout/stderr artifact location, changed files, snapshots, and failure hints.
@@ -89,6 +89,7 @@ Preserve these constraints in code and docs:
 
 - Keep implementation close to the documented MVP. Avoid broad framework introductions and speculative abstractions.
 - Keep standard mode usable without LLM or Deli_AutoResearch. Do not make the AutoResearch protocol a dependency of standard mode.
+- Keep Pi agent scoped to intelligent-mode worker execution. It must not replace the standard-mode matrix runner or the Deli_AutoResearch orchestration protocol.
 - Add new frontend copy through `frontend/src/i18n.ts` so Chinese and English stay available.
 - Respect the backend-first sequence in `docs/task_list.md`. Do not create `frontend/` or add frontend dependencies until backend checks pass, and do not bypass the Phase 9 E2E gate unless explicitly instructed.
 - Use Pydantic models for external API payloads, plugin specs, benchmark results, and LLM structured outputs.

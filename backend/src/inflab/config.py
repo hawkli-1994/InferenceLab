@@ -51,6 +51,16 @@ class LLMProviderSettings(BaseSettings):
     model: str | None = None
 
 
+class AgentExecutorSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="INFLAB_AGENT_EXECUTOR_", extra="ignore")
+
+    provider: Literal["disabled", "pi"] = "pi"
+    command: str = "pi"
+    work_dir: str = "/data/workspace/inflab-autoresearch"
+    max_rounds: int = 15
+    timeout_minutes: int = 30
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore", populate_by_name=True)
 
@@ -67,6 +77,7 @@ class AppSettings(BaseSettings):
     object_storage: ObjectStorageSettings = Field(default_factory=ObjectStorageSettings)
     ssh: SSHSettings = Field(default_factory=SSHSettings)
     llm_provider: LLMProviderSettings = Field(default_factory=LLMProviderSettings)
+    agent_executor: AgentExecutorSettings = Field(default_factory=AgentExecutorSettings)
 
 
 @lru_cache

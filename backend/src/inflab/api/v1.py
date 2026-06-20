@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from inflab.agent_executor import intelligent_worker_prompt, pi_agent_executor_plan
 from inflab.artifacts import distribute_model, distribution_plan, sha256_text
 from inflab.autoresearch_integration import autoresearch_integration_plan
 from inflab.benchmark import (
@@ -362,7 +363,28 @@ def openapi_ready() -> dict[str, str]:
 
 @router.get("/autoresearch/integration-plan", response_model=dict[str, Any])
 def get_autoresearch_integration_plan() -> dict[str, Any]:
-    return autoresearch_integration_plan()
+    settings = get_settings()
+    return autoresearch_integration_plan(pi_agent_executor_plan(settings.agent_executor))
+
+
+@router.get("/agent-executors/pi/plan", response_model=dict[str, Any])
+def get_pi_agent_executor_plan() -> dict[str, Any]:
+    return pi_agent_executor_plan(get_settings().agent_executor).as_dict()
+
+
+@router.get("/agent-executors/pi/prompt", response_model=dict[str, str])
+def get_pi_agent_worker_prompt() -> dict[str, str]:
+    return {
+        "prompt": intelligent_worker_prompt(
+            task_spec_path="state/task_spec.md",
+            progress_path="state/progress.json",
+            directions_path="state/directions_tried.json",
+            completion_criteria=(
+                "produce at least one verifiable benchmark optimization finding or "
+                "record a typed stall reason"
+            ),
+        )
+    }
 
 
 @router.post("/dev/seed-demo-data", response_model=dict[str, int])

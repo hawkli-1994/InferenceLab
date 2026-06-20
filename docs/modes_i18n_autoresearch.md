@@ -8,7 +8,7 @@
 | 模式 | 英文名 | 定位 | 默认启用 |
 |---|---|---|---|
 | 标准模式 | `standard` | 软件驱动、确定性 case 矩阵、可解释、可复现 | 是 |
-| 智能模式 | `intelligent` | Agent + Deli_AutoResearch 协议驱动的长周期优化 | 否 |
+| 智能模式 | `intelligent` | Deli_AutoResearch 协议 + Pi agent 执行器驱动的长周期优化 | 否 |
 
 ### 标准模式
 
@@ -30,6 +30,7 @@
 - 当前已有 Agent 状态机：Observe、Plan、Validate、Act、Collect、Reflect。
 - LLM candidate provider。
 - Deli_AutoResearch 协议：状态文件、停滞检测、强制 pivot、heartbeat watchdog、guardian/worker 分离。
+- Pi agent worker executor：执行单轮有界 worker iteration。
 - gates：单元测试、API contract、前端 build、benchmark score floor。
 
 智能模式不能绕开标准模式的数据结构。所有 trial 仍必须记录：
@@ -72,6 +73,8 @@
 
 ```text
 GET /api/v1/autoresearch/integration-plan
+GET /api/v1/agent-executors/pi/plan
+GET /api/v1/agent-executors/pi/prompt
 ```
 
 ## 3. Deli_AutoResearch 选型
@@ -82,6 +85,7 @@ GET /api/v1/autoresearch/integration-plan
 
 - 它不是可执行 benchmark runner，也不是外部 CLI。
 - 它是长周期自治任务协议，用来约束智能模式的状态持久化、停滞检测、方向多样性和 watchdog。
+- Pi agent 是执行器，不是协议层；它只负责完成一轮 worker iteration。
 - InferenceLab 仍保留自己的机器纳管、实验记录、报告和可复现数据模型。
 
 核心协议：
@@ -98,7 +102,8 @@ GET /api/v1/autoresearch/integration-plan
 
 1. 标准模式不依赖 Deli_AutoResearch。
 2. 智能模式先通过后端 `GET /api/v1/autoresearch/integration-plan` 暴露协议、gates 和边界。
-3. 后续智能模式落地时，在实验目录生成：
+3. Pi agent 通过 `GET /api/v1/agent-executors/pi/plan` 暴露可配置执行器计划，通过 `GET /api/v1/agent-executors/pi/prompt` 生成单轮 worker prompt。
+4. 后续智能模式落地时，在实验目录生成：
    - `state/task_spec.md`
    - `state/progress.json`
    - `state/findings.jsonl`
@@ -107,8 +112,9 @@ GET /api/v1/autoresearch/integration-plan
    - `logs/work.jsonl`
    - `logs/orchestrator.jsonl`
    - `logs/heartbeat.jsonl`
-4. 智能模式每轮必须运行 gates：`uv run pytest`、`uv run ruff check .`、`pnpm build`，后续再增加 benchmark score gate。
-5. Deli_AutoResearch 只能约束智能模式的编排和搜索，不得修改实验记录、报告真实性和标准模式行为。
+5. 每次 Pi worker session 上限：15 rounds 或 30 minutes。
+6. 智能模式每轮必须运行 gates：`uv run pytest`、`uv run ruff check .`、`pnpm build`，后续再增加 benchmark score gate。
+7. Deli_AutoResearch 只能约束智能模式的编排和搜索；Pi agent 只能执行有界 worker iteration；两者都不得修改实验记录、报告真实性和标准模式行为。
 
 ## 4. 国际化策略
 
@@ -132,14 +138,16 @@ GET /api/v1/autoresearch/integration-plan
 2. 完善标准模式的 benchmark case matrix、progressive skip 和公司 CSV 报告。
 3. 完成 UI/报告国际化。
 4. 增加智能模式开关，但默认关闭。
-5. 接入 Deli_AutoResearch 的状态文件、停滞检测和 heartbeat watchdog。
-6. 智能模式稳定后，允许用户在标准模式和智能模式之间切换。
+5. 接入 Pi agent 作为智能模式 worker executor。
+6. 接入 Deli_AutoResearch 的状态文件、停滞检测和 heartbeat watchdog。
+7. 智能模式稳定后，允许用户在标准模式和智能模式之间切换。
 
 ## 6. 验收要求
 
 - 新建实验默认 `mode=standard`。
 - 候选预览在标准模式下返回 `StandardMatrix` phase。
 - 智能模式不会在未配置 LLM/AutoResearch orchestration 时破坏标准流程。
+- Pi agent executor plan 明确显示其 worker 角色、命令、工作目录和 round/time cap。
 - UI 可在中文/英文之间切换。
 - 单元测试覆盖标准模式矩阵、智能模式规划和 AutoResearch integration plan。
 - E2E 仍按当前项目策略绕过，不提交 `tests/e2e/backend_e2e_enabled`。

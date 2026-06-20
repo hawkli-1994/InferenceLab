@@ -27,7 +27,7 @@ SSH、远程 benchmark、对象存储和外部 LLM 都需要显式 opt-in。
 - Backend: FastAPI + PostgreSQL + Redis/RQ
 - Remote Executor: AsyncSSH + rsync + 幂等 Step
 - Frontend: React + Vite + TypeScript + ECharts
-- Modes: 标准模式（默认）+ 智能模式（Agent/Deli_AutoResearch）
+- Modes: 标准模式（默认）+ 智能模式（Deli_AutoResearch + Pi agent）
 - i18n: 中文 + English
 - Reports: Markdown + Pandoc + Typst
 - Deployment: Docker Compose 单实例

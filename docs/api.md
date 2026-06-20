@@ -13,6 +13,7 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 - Experiments: standard/intelligent mode candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data.
 - Plugins: runtime/framework/driver/model plugin registry.
 - AutoResearch: `GET /api/v1/autoresearch/integration-plan` exposes the Deli_AutoResearch intelligent-mode protocol boundary.
+- Agent executors: `GET /api/v1/agent-executors/pi/plan` and `/prompt` expose the Pi worker executor plan for intelligent mode.
 - Reports: list/query, Markdown rendering, PDF/DOCX export through Pandoc/Typst when installed, artifact metadata, redaction.
 - Dev data: `POST /api/v1/dev/seed-demo-data` creates idempotent database-backed demo records.
 
@@ -87,8 +88,13 @@ Experiment planning accepts `mode`:
   boundary for long-horizon orchestration.
 
 `GET /api/v1/autoresearch/integration-plan` returns the intended state files, watchdog,
-stall-detection, and gate commands for the intelligent mode. The protocol is metadata-only in this
-slice; standard mode does not depend on it.
+stall-detection, gate commands, and Pi worker executor metadata for the intelligent mode. The
+protocol is metadata-only in this slice; standard mode does not depend on it.
+
+Pi agent is modeled as a worker executor:
+
+- `GET /api/v1/agent-executors/pi/plan`: provider, command, work dir, round cap, timeout, and boundary notes.
+- `GET /api/v1/agent-executors/pi/prompt`: bounded one-iteration worker prompt aligned with Deli_AutoResearch.
 
 ## LLM Candidate Provider
 

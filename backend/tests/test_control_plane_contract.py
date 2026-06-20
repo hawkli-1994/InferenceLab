@@ -203,6 +203,54 @@ def test_manual_environment_bootstrap_bypasses_ssh_and_marks_machine_ready(
     assert machine_after.json()["status"] == "ready"
 
 
+def test_pi_environment_workflow_records_generic_agent_handoff(
+    client: TestClient,
+) -> None:
+    machine_response = client.post(
+        "/api/v1/machines",
+        json={
+            "name": "pi-env",
+            "host": "10.0.0.87",
+            "username": "seed",
+            "runtime_mode": "both",
+        },
+    )
+    assert machine_response.status_code == 201
+    machine = machine_response.json()
+
+    bootstrap_response = client.post(
+        f"/api/v1/machines/{machine['id']}/bootstrap",
+        json={
+            "profile": "full",
+            "dry_run": True,
+            "strategy": "pi_workflow",
+            "pi_workflow_goal": "Prepare a mixed CUDA and container benchmark host.",
+        },
+    )
+
+    assert bootstrap_response.status_code == 200
+    bootstrap = bootstrap_response.json()
+    assert bootstrap["status"] == "succeeded"
+    assert bootstrap["modules"] == ["PI_ENV_WORKFLOW"]
+    step = bootstrap["step_results"][0]
+    assert step["status"] == "unchanged"
+    assert step["snapshots"]["configuration_mode"] == "pi_workflow"
+    assert step["snapshots"]["scripted_bootstrap_executed"] is False
+    assert step["snapshots"]["pi_executor_plan"]["role"] == (
+        "bounded_executor_for_environment_setup_workflow"
+    )
+    assert "mixed CUDA" in step["snapshots"]["workflow_goal"]
+    assert "Discover OS, GPU" in step["snapshots"]["workflow_prompt"]
+    assert (
+        "dry-run: Pi environment workflow prompt prepared"
+        in (step["phase_results"]["apply"]["stdout"])
+    )
+
+    machine_after = client.get(f"/api/v1/machines/{machine['id']}")
+    assert machine_after.status_code == 200
+    assert machine_after.json()["status"] == "agent_workflow_planned"
+
+
 def test_fake_control_plane_business_loop(client: TestClient) -> None:
     machine, snapshot = create_ready_machine(client)
     assert snapshot["profile"]["hardware"]["gpu"][0]["model"] == "MockGPU"

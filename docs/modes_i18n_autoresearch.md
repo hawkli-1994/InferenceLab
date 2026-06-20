@@ -68,6 +68,8 @@
 - 未传 `mode` 时使用 `standard`。
 - `standard` 只使用确定性矩阵规划。
 - `intelligent` 才允许调用 LLM candidate provider 和 Deli_AutoResearch orchestration。
+- 环境接管是实验模式之外的 provisioning 流程；复杂机器优先使用 `strategy=pi_workflow`
+  的泛描述工作流 + Pi agent 执行，固定 B1-B7 只作为 scripted baseline。
 
 智能模式协议计划通过以下接口暴露：
 
@@ -88,7 +90,7 @@ POST /api/v1/agent-settings/validate
 
 - 它不是可执行 benchmark runner，也不是外部 CLI。
 - 它是长周期自治任务协议，用来约束智能模式的状态持久化、停滞检测、方向多样性和 watchdog。
-- Pi agent 是执行器，不是协议层；它只负责完成一轮 worker iteration。
+- Pi agent 是执行器，不是协议层；在智能模式中它负责完成一轮 worker iteration，在环境接管中它负责执行泛描述 provisioning workflow。
 - InferenceLab 仍保留自己的机器纳管、实验记录、报告和可复现数据模型。
 
 核心协议：
@@ -106,7 +108,7 @@ POST /api/v1/agent-settings/validate
 1. 标准模式不依赖 Deli_AutoResearch。
 2. 智能模式先通过后端 `GET /api/v1/autoresearch/integration-plan` 暴露协议、gates 和边界。
 3. Pi agent 通过 `GET /api/v1/agent-executors/pi/plan` 暴露可配置执行器计划，通过 `GET /api/v1/agent-executors/pi/prompt` 生成单轮 worker prompt。
-4. Agent Settings 面板持久化 LLM provider、Base URL、Model、加密 API Key，以及 Pi agent command/work dir/round/timeout；标准模式不读取这些配置。
+4. Agent Settings 面板持久化 LLM provider、Base URL、Model、加密 API Key，以及 Pi agent command/work dir/round/timeout；标准模式实验规划不读取这些配置，环境接管 Pi workflow 会读取 Pi executor 配置。
 5. 后续智能模式落地时，在实验目录生成：
    - `state/task_spec.md`
    - `state/progress.json`
@@ -118,9 +120,24 @@ POST /api/v1/agent-settings/validate
    - `logs/heartbeat.jsonl`
 6. 每次 Pi worker session 上限来自 Agent Settings，默认 15 rounds 或 30 minutes。
 7. 智能模式每轮必须运行 gates：`uv run pytest`、`uv run ruff check .`、`pnpm build`，后续再增加 benchmark score gate。
-8. Deli_AutoResearch 只能约束智能模式的编排和搜索；Pi agent 只能执行有界 worker iteration；两者都不得修改实验记录、报告真实性和标准模式行为。
+8. Deli_AutoResearch 只能约束智能模式的编排和搜索；Pi agent 在智能模式中只能执行有界 worker iteration，在环境接管中只能执行 provisioning workflow；两者都不得修改实验记录、报告真实性和标准模式行为。
 
-## 4. 国际化策略
+## 4. 环境接管工作流
+
+固定环境脚本只能覆盖理想路径。真实 AI 服务器的 CUDA/驱动、容器 runtime、镜像源、
+NAS/本地盘、权限、已有用户和站点策略都会分叉，因此默认产品路径改为：
+
+1. 用户在 UI 选择 `Pi 工作流`，填写或保留默认泛描述目标。
+2. 后端生成 `PI_ENV_WORKFLOW`，包含机器上下文、profile 参考、workflow prompt、Pi executor plan。
+3. `dry_run=true` 时只记录计划，不执行 Pi，也不把机器标记为 ready。
+4. `dry_run=false` 时把 prompt 通过 stdin 交给配置的 Pi command 执行，由 Pi 完成 discover/plan/apply/verify/record。
+5. 固定 B1-B7 脚本保留为 `Scripted Baseline`，用于 CI、demo 和可复现最小路径，不再作为真实复杂环境的唯一推荐路径。
+6. `Manual` 仍是一等路径：用户自行配置后确认，系统记录 `MANUAL_ENV` 并允许继续 benchmark。
+
+该流程不改变标准模式的实验执行方式。标准模式仍由软件矩阵生成 candidate；Pi 只帮助处理
+环境 provisioning 或后续智能模式 worker iteration。
+
+## 5. 国际化策略
 
 前端必须支持中文和英文：
 
@@ -136,23 +153,26 @@ POST /api/v1/agent-settings/validate
 - 面向用户的报告模板和前端文案支持中英文。
 - 后续报告生成要增加 locale 参数，默认继承前端选择。
 
-## 5. 实施顺序
+## 6. 实施顺序
 
 1. 标准模式作为默认模式上线。
 2. 完善标准模式的 benchmark case matrix、progressive skip 和公司 CSV 报告。
 3. 完成 UI/报告国际化。
 4. 增加智能模式开关，但默认关闭。
 5. 接入 Pi agent 作为智能模式 worker executor。
-6. 接入 Deli_AutoResearch 的状态文件、停滞检测和 heartbeat watchdog。
-7. 智能模式稳定后，允许用户在标准模式和智能模式之间切换。
+6. 将环境接管主路径改为 Pi workflow，固定脚本保留为 scripted baseline。
+7. 接入 Deli_AutoResearch 的状态文件、停滞检测和 heartbeat watchdog。
+8. 智能模式稳定后，允许用户在标准模式和智能模式之间切换。
 
-## 6. 验收要求
+## 7. 验收要求
 
 - 新建实验默认 `mode=standard`。
 - 候选预览在标准模式下返回 `StandardMatrix` phase。
 - 智能模式不会在未配置 LLM/AutoResearch orchestration 时破坏标准流程。
 - Pi agent executor plan 明确显示其 worker 角色、命令、工作目录和 round/time cap。
-- Agent Settings UI 可配置 LLM provider 和 Pi agent，并明确提示只有智能模式使用。
+- Agent Settings UI 可配置 LLM provider 和 Pi agent，并明确 Pi 用于环境工作流和智能模式 worker，标准模式矩阵不依赖它。
+- Bootstrap UI 默认提供 Pi workflow，并保留 Scripted Baseline 和 Manual 三种环境策略。
+- Pi workflow dry-run 只记录 prompt/plan，不执行 B1-B7，不把机器误标为 ready。
 - UI 可在中文/英文之间切换。
 - 单元测试覆盖标准模式矩阵、智能模式规划和 AutoResearch integration plan。
 - E2E 仍按当前项目策略绕过，不提交 `tests/e2e/backend_e2e_enabled`。

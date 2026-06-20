@@ -5,7 +5,7 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 ## Implemented Surfaces
 
 - Machines: CRUD, dry-run or real SSH probe, snapshots, credential masking.
-- Bootstrap: Full/standard/minimal/custom profiles, B1-B7 dry-run step results, manual opt-in real SSH execution, manual environment bypass, rerun single module.
+- Bootstrap: Pi environment workflow, scripted Full/standard/minimal/custom profiles, B1-B7 dry-run step results, manual opt-in real SSH execution, manual environment bypass, rerun single module.
 - Models and images: registry records, SHA256 metadata, dry-run plans and opt-in distribution for rsync/NFS/MinIO/HuggingFace/ModelScope.
 - Artifacts: report/log/snapshot/metrics/model/image references plus S3-compatible text upload.
 - Jobs: synchronous fake queue and Redis/RQ queue adapter with status, progress, logs, and result.
@@ -44,18 +44,27 @@ upload failure is appended to the job logs.
 
 Default tests still do not install vLLM/SGLang, start a model, touch GPUs, or open SSH connections.
 
-## Real SSH Bootstrap
+## Environment Setup Strategies
 
-`POST /api/v1/machines/{machine_id}/bootstrap` selects execution mode from `dry_run`:
+`POST /api/v1/machines/{machine_id}/bootstrap` accepts `strategy`:
 
-- `dry_run=true`: uses `FakeExecutor`, suitable for default tests and demos.
-- `dry_run=false`: decrypts the stored machine credential and uses `AsyncSSHExecutor`.
-- `manual_environment=true`: skips B1-B7 command execution, records a `MANUAL_ENV` bootstrap step,
+- `strategy=pi_workflow`: preferred path for real environments. The backend builds a generic
+  discover/plan/apply/verify/record workflow prompt and hands it to the configured Pi agent.
+  `dry_run=true` records the prompt and Pi executor plan without executing Pi; `dry_run=false`
+  runs the configured Pi command with the prompt on stdin. This path records `PI_ENV_WORKFLOW`
+  and does not execute B1-B7 scripted commands.
+- `strategy=scripted`: B1-B7 baseline. `dry_run=true` uses `FakeExecutor`, suitable for default
+  tests and demos. `dry_run=false` decrypts the stored machine credential and uses
+  `AsyncSSHExecutor`.
+- `strategy=manual` or `manual_environment=true`: skips Pi workflow and B1-B7 command execution,
+  records a `MANUAL_ENV` bootstrap step,
   and marks the machine `ready` so the user can proceed after configuring the environment manually.
   This path does not require an SSH credential and ignores `dry_run` for execution.
 
-The workbench exposes the third path as a dynamic setup-mode selector: Automatic setup runs the
-selected bootstrap profile, while Manual setup records user-confirmed self-configuration.
+The workbench exposes all three paths as a dynamic setup-mode selector. Pi Workflow is the default,
+Scripted Baseline keeps a reproducible fixed profile, and Manual setup records user-confirmed
+self-configuration. A Pi workflow dry-run marks the machine `agent_workflow_planned`; only manual
+confirmation or successful non-dry-run execution marks it `ready`.
 
 The real SSH executor supports remote command execution with cwd/env/sudo/timeout plus SFTP
 upload/download. Password and PEM private-key credentials are supported. Host-key behavior follows
@@ -105,7 +114,9 @@ The workbench exposes an Agent Settings panel beside experiment creation. It can
 - Pi agent enabled state, command, work dir, max rounds, and timeout;
 - config validation plus the current Pi executor plan and worker prompt preview.
 
-Pi agent is modeled as a worker executor:
+Pi agent is modeled as a bounded executor. It has two product roles: environment provisioning
+workflow execution and intelligent-mode worker iterations. It must not replace the standard-mode
+software matrix runner.
 
 - `GET /api/v1/agent-executors/pi/plan`: provider, command, work dir, round cap, timeout, and boundary notes.
 - `GET /api/v1/agent-executors/pi/prompt`: bounded one-iteration worker prompt aligned with Deli_AutoResearch.

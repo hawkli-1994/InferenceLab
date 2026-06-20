@@ -36,6 +36,12 @@ class BootstrapProfile(StrEnum):
     custom = "custom"
 
 
+class EnvironmentSetupStrategy(StrEnum):
+    pi_workflow = "pi_workflow"
+    scripted = "scripted"
+    manual = "manual"
+
+
 class BenchmarkKind(StrEnum):
     serve = "serve"
     throughput = "throughput"
@@ -150,8 +156,31 @@ class BootstrapRequest(BaseModel):
     profile: BootstrapProfile = BootstrapProfile.full
     modules: list[str] | None = None
     dry_run: bool = True
+    strategy: EnvironmentSetupStrategy | None = None
+    pi_workflow: bool = False
+    pi_workflow_goal: str | None = Field(default=None, max_length=2000)
     manual_environment: bool = False
     manual_environment_note: str | None = Field(default=None, max_length=500)
+
+    def resolved_strategy(self) -> EnvironmentSetupStrategy:
+        if self.strategy is not None:
+            return self.strategy
+        if self.manual_environment:
+            return EnvironmentSetupStrategy.manual
+        if self.pi_workflow:
+            return EnvironmentSetupStrategy.pi_workflow
+        return EnvironmentSetupStrategy.scripted
+
+    @model_validator(mode="after")
+    def strategy_flags_must_not_conflict(self) -> BootstrapRequest:
+        flag_count = int(self.manual_environment) + int(self.pi_workflow)
+        if flag_count > 1:
+            raise ValueError("manual_environment and pi_workflow cannot both be true")
+        if self.strategy == EnvironmentSetupStrategy.manual and self.pi_workflow:
+            raise ValueError("strategy=manual cannot be combined with pi_workflow=true")
+        if self.strategy == EnvironmentSetupStrategy.pi_workflow and self.manual_environment:
+            raise ValueError("strategy=pi_workflow cannot be combined with manual_environment=true")
+        return self
 
 
 class BootstrapRunRead(BaseModel):

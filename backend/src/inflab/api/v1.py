@@ -9,7 +9,13 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from inflab.agent_executor import intelligent_worker_prompt, pi_agent_executor_plan
+from inflab.agent_executor import (
+    environment_setup_worker_prompt,
+    intelligent_worker_prompt,
+    pi_agent_executor_plan,
+    pi_environment_workflow_plan,
+    run_pi_environment_workflow,
+)
 from inflab.artifacts import distribute_model, distribution_plan, sha256_text
 from inflab.autoresearch_integration import autoresearch_integration_plan
 from inflab.benchmark import (
@@ -60,6 +66,7 @@ from inflab.schemas import (
     BootstrapRunRead,
     CommandRecord,
     CommandResult,
+    EnvironmentSetupStrategy,
     ExperimentCreate,
     ExperimentMode,
     ExperimentPlanRead,
@@ -190,6 +197,108 @@ def _manual_environment_step(note: str | None) -> StepResult:
             "automatic_bootstrap_executed": False,
             "user_note": clean_note,
         },
+    )
+
+
+def _default_environment_workflow_goal(machine: Machine) -> str:
+    return (
+        "Prepare this machine for reproducible InferenceLab model inference benchmarking. "
+        "Discover the actual OS, GPU driver, CUDA or ROCm stack, container runtime, Python "
+        "runtime, storage, network, package mirrors, permissions, and site policy first. "
+        "Then choose the smallest idempotent changes needed for container and bare-metal "
+        "vLLM/SGLang benchmarking, verify readiness, and record every command, version, "
+        "changed file, unresolved blocker, and manual follow-up. Do not assume one fixed "
+        f"script can configure host {machine.host} correctly."
+    )
+
+
+async def _pi_environment_workflow_step(
+    *,
+    machine: Machine,
+    payload: BootstrapRequest,
+    pi_settings: AgentExecutorSettings,
+) -> StepResult:
+    clean_goal = _clean_optional_text(payload.pi_workflow_goal)
+    workflow_goal = clean_goal or _default_environment_workflow_goal(machine)
+    machine_context = {
+        "name": machine.name,
+        "host": machine.host,
+        "port": machine.port,
+        "username": machine.username,
+        "runtime_mode": machine.runtime_mode,
+    }
+    prompt = environment_setup_worker_prompt(
+        machine=machine_context,
+        profile=payload.profile.value,
+        workflow_goal=workflow_goal,
+        dry_run=payload.dry_run,
+    )
+    plan = pi_environment_workflow_plan(pi_settings).as_dict()
+    detect_command = CommandRecord(command="prepare_pi_environment_workflow")
+    detect_result = CommandResult(
+        command=detect_command,
+        exit_code=0,
+        stdout=(
+            "Prepared generic environment workflow for Pi agent. "
+            "Fixed B1-B7 bootstrap scripts are not executed in this strategy."
+        ),
+    )
+    apply_result = await run_pi_environment_workflow(
+        pi_settings,
+        prompt,
+        dry_run=payload.dry_run,
+    )
+    verify_command = CommandRecord(command="record_pi_environment_workflow_verdict")
+    if apply_result.exit_code == 0:
+        verify_stdout = (
+            "Pi environment workflow accepted. Review Pi output for readiness verdict "
+            "and blocker details."
+        )
+        verify_exit = 0
+    else:
+        verify_stdout = ""
+        verify_exit = apply_result.exit_code
+    verify_result = CommandResult(
+        command=verify_command,
+        exit_code=verify_exit,
+        stdout=verify_stdout,
+        stderr="" if verify_exit == 0 else "Pi environment workflow did not complete.",
+    )
+    exit_code = max(detect_result.exit_code, apply_result.exit_code, verify_result.exit_code)
+    return StepResult(
+        id="PI_ENV_WORKFLOW",
+        name="Pi agent environment workflow",
+        status=(
+            StepStatus.failed
+            if exit_code != 0
+            else StepStatus.unchanged
+            if payload.dry_run
+            else StepStatus.changed
+        ),
+        phase_results={
+            "detect": detect_result,
+            "apply": apply_result,
+            "verify": verify_result,
+        },
+        commands=[detect_command, apply_result.command, verify_command],
+        exit_code=exit_code,
+        stdout_uri=f"memory://artifacts/{machine.id}/PI_ENV_WORKFLOW/stdout.txt",
+        stderr_uri=f"memory://artifacts/{machine.id}/PI_ENV_WORKFLOW/stderr.txt",
+        changed_files=[],
+        snapshots={
+            "configuration_mode": "pi_workflow",
+            "scripted_bootstrap_executed": False,
+            "automatic_bootstrap_executed": False,
+            "dry_run": payload.dry_run,
+            "workflow_goal": workflow_goal,
+            "workflow_prompt": prompt,
+            "pi_executor_plan": plan,
+        },
+        failure_hint=(
+            None
+            if exit_code == 0
+            else "Check Pi agent command, work directory, access policy, and target-machine access."
+        ),
     )
 
 
@@ -810,7 +919,8 @@ async def bootstrap_machine(
     machine = session.get(Machine, machine_id)
     if machine is None:
         raise _not_found("machine")
-    if payload.manual_environment:
+    strategy = payload.resolved_strategy()
+    if strategy == EnvironmentSetupStrategy.manual:
         manual_step = _manual_environment_step(payload.manual_environment_note)
         run = BootstrapRun(
             machine_id=machine_id,
@@ -822,6 +932,31 @@ async def bootstrap_machine(
             failure_hint=None,
         )
         machine.status = "ready"
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return _bootstrap_read(run)
+
+    if strategy == EnvironmentSetupStrategy.pi_workflow:
+        pi_step = await _pi_environment_workflow_step(
+            machine=machine,
+            payload=payload,
+            pi_settings=_effective_agent_executor_settings(session),
+        )
+        run_status = "failed" if pi_step.exit_code != 0 else "succeeded"
+        run = BootstrapRun(
+            machine_id=machine_id,
+            profile=payload.profile.value,
+            status=run_status,
+            modules=[pi_step.id],
+            step_results=[pi_step.model_dump(mode="json")],
+            failure_class="pi_environment_workflow_failed" if pi_step.exit_code != 0 else None,
+            failure_hint=pi_step.failure_hint if pi_step.exit_code != 0 else None,
+        )
+        if run_status == "succeeded":
+            machine.status = "agent_workflow_planned" if payload.dry_run else "ready"
+        else:
+            machine.status = "agent_workflow_failed"
         session.add(run)
         session.commit()
         session.refresh(run)

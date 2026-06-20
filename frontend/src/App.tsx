@@ -48,7 +48,7 @@ import type {
 } from "./types";
 
 type View = "machines" | "bootstrap" | "experiments" | "runs" | "compare" | "history" | "reports";
-type EnvironmentSetupMode = "automatic" | "manual";
+type EnvironmentSetupMode = "pi_workflow" | "scripted" | "manual";
 
 const navItems: Array<{ id: View; labelKey: MessageKey; icon: ElementType }> = [
   { id: "machines", labelKey: "machines", icon: Server },
@@ -316,11 +316,13 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   const [profile, setProfile] = useState("full");
   const [dryRun, setDryRun] = useState(true);
   const [environmentSetupMode, setEnvironmentSetupMode] =
-    useState<EnvironmentSetupMode>("automatic");
+    useState<EnvironmentSetupMode>("pi_workflow");
+  const [piWorkflowGoal, setPiWorkflowGoal] = useState("");
   const [manualEnvironmentNote, setManualEnvironmentNote] = useState("");
   const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
   const selectedMachineId = machineId || machines[0]?.id || "";
   const manualEnvironment = environmentSetupMode === "manual";
+  const piWorkflow = environmentSetupMode === "pi_workflow";
   const runBootstrap = useMutation({
     mutationFn: () =>
       manualEnvironment
@@ -328,9 +330,16 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
             selectedMachineId,
             manualEnvironmentNote.trim() || undefined
           )
+        : piWorkflow
+          ? api.runPiEnvironmentWorkflow(selectedMachineId, {
+              profile,
+              dry_run: dryRun,
+              goal: piWorkflowGoal.trim() || undefined
+            })
         : api.bootstrapMachine(selectedMachineId, {
             profile,
-            dry_run: dryRun
+            dry_run: dryRun,
+            strategy: "scripted"
           }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
@@ -338,6 +347,25 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
     }
   });
   const latestRun = bootstrapRuns.data?.[0] as BootstrapRun | undefined;
+  const flowSteps = piWorkflow
+    ? [
+        t("workflowDiscover"),
+        t("workflowPlan"),
+        t("workflowApply"),
+        t("workflowVerify"),
+        t("workflowRecord")
+      ]
+    : manualEnvironment
+      ? [t("manualConfirm"), t("manualRecord"), t("manualProceed")]
+      : [
+          "B1 Access",
+          "B2 Source",
+          "B3 Package",
+          "B4 Storage",
+          "B5 Container",
+          "B6 Baseline",
+          "B7 Bare Metal"
+        ];
 
   return (
     <section className="stack">
@@ -347,65 +375,102 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
           <p>{t("bootstrapDesc")}</p>
         </div>
       </header>
-      <div className="panel flow">
-        {["B1 Access", "B2 Source", "B3 Package", "B4 Storage", "B5 Container", "B6 Baseline", "B7 Bare Metal"].map(
-          (step, index) => (
-            <div className="flow-step" key={step}>
-              <span>{index + 1}</span>
-              <strong>{step}</strong>
-              <small>detect / apply / verify</small>
-            </div>
-          )
-        )}
+      <div className={`panel flow flow-${environmentSetupMode}`}>
+        {flowSteps.map((step, index) => (
+          <div className="flow-step" key={step}>
+            <span>{index + 1}</span>
+            <strong>{step}</strong>
+            <small>
+              {piWorkflow
+                ? t("agentWorkflow")
+                : manualEnvironment
+                  ? t("auditRecord")
+                  : "detect / apply / verify"}
+            </small>
+          </div>
+        ))}
       </div>
       <div className="panel">
         <h2>{t("target")}</h2>
-        <div className="inline-controls setup-controls">
-          <select value={selectedMachineId} onChange={(event) => setMachineId(event.target.value)}>
-            {machines.length === 0 ? (
-              <option value="">No machines</option>
-            ) : (
-              machines.map((machine) => (
-                <option value={machine.id} key={machine.id}>
-                  {machine.name}
-                </option>
-              ))
-            )}
-          </select>
-          <div className="setup-mode" aria-label={t("environmentSetupMode")}>
-            <button
-              type="button"
-              className={environmentSetupMode === "automatic" ? "active" : ""}
-              onClick={() => setEnvironmentSetupMode("automatic")}
-            >
-              <RotateCw size={15} /> {t("automaticSetup")}
-            </button>
-            <button
-              type="button"
-              className={environmentSetupMode === "manual" ? "active" : ""}
-              onClick={() => setEnvironmentSetupMode("manual")}
-            >
-              <UserCheck size={15} /> {t("manualSetup")}
+        <div className="setup-form">
+          <div className="inline-controls setup-controls">
+            <select value={selectedMachineId} onChange={(event) => setMachineId(event.target.value)}>
+              {machines.length === 0 ? (
+                <option value="">No machines</option>
+              ) : (
+                machines.map((machine) => (
+                  <option value={machine.id} key={machine.id}>
+                    {machine.name}
+                  </option>
+                ))
+              )}
+            </select>
+            <div className="setup-mode" aria-label={t("environmentSetupMode")}>
+              <button
+                type="button"
+                className={environmentSetupMode === "pi_workflow" ? "active" : ""}
+                onClick={() => setEnvironmentSetupMode("pi_workflow")}
+              >
+                <TerminalSquare size={15} /> {t("piWorkflowSetup")}
+              </button>
+              <button
+                type="button"
+                className={environmentSetupMode === "scripted" ? "active" : ""}
+                onClick={() => setEnvironmentSetupMode("scripted")}
+              >
+                <RotateCw size={15} /> {t("scriptedSetup")}
+              </button>
+              <button
+                type="button"
+                className={environmentSetupMode === "manual" ? "active" : ""}
+                onClick={() => setEnvironmentSetupMode("manual")}
+              >
+                <UserCheck size={15} /> {t("manualSetup")}
+              </button>
+            </div>
+            {!manualEnvironment ? (
+              <>
+                <select value={profile} onChange={(event) => setProfile(event.target.value)}>
+                  <option value="minimal">minimal</option>
+                  <option value="standard_container">standard container</option>
+                  <option value="standard_bare_metal">standard bare metal</option>
+                  <option value="full">full</option>
+                </select>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={dryRun}
+                    onChange={(event) => setDryRun(event.target.checked)}
+                  />
+                  {t("dryRun")}
+                </label>
+              </>
+            ) : null}
+            <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
+              <Play size={16} />{" "}
+              {runBootstrap.isPending
+                ? t("running")
+                : manualEnvironment
+                  ? t("confirmManualSetup")
+                  : piWorkflow
+                    ? dryRun
+                      ? t("previewPiWorkflow")
+                      : t("runPiWorkflow")
+                    : dryRun
+                      ? t("runDryRun")
+                      : t("runSsh")}
             </button>
           </div>
-          {!manualEnvironment ? (
-            <>
-              <select value={profile} onChange={(event) => setProfile(event.target.value)}>
-                <option value="minimal">minimal</option>
-                <option value="standard_container">standard container</option>
-                <option value="standard_bare_metal">standard bare metal</option>
-                <option value="full">full</option>
-              </select>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={dryRun}
-                  onChange={(event) => setDryRun(event.target.checked)}
-                />
-                {t("dryRun")}
-              </label>
-            </>
-          ) : (
+          {piWorkflow ? (
+            <textarea
+              className="workflow-goal"
+              value={piWorkflowGoal}
+              maxLength={2000}
+              placeholder={t("piWorkflowGoalPlaceholder")}
+              onChange={(event) => setPiWorkflowGoal(event.target.value)}
+            />
+          ) : null}
+          {manualEnvironment ? (
             <input
               className="manual-note"
               value={manualEnvironmentNote}
@@ -413,17 +478,7 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
               placeholder={t("manualEnvironmentNote")}
               onChange={(event) => setManualEnvironmentNote(event.target.value)}
             />
-          )}
-          <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
-            <Play size={16} />{" "}
-            {runBootstrap.isPending
-              ? t("running")
-              : manualEnvironment
-                ? t("confirmManualSetup")
-                : dryRun
-                  ? t("runDryRun")
-                  : t("runSsh")}
-          </button>
+          ) : null}
         </div>
       </div>
       <div className="panel table-panel">

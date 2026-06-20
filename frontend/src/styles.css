@@ -19,7 +19,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -249,9 +250,14 @@ select {
   align-items: center;
 }
 
+.setup-form {
+  display: grid;
+  gap: 12px;
+}
+
 .setup-mode {
   display: inline-flex;
-  height: 38px;
+  min-height: 38px;
   padding: 3px;
   gap: 3px;
   background: #e6eeeb;
@@ -264,7 +270,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 98px;
+  min-width: 116px;
   height: 30px;
   padding: 0 10px;
   color: #43514e;
@@ -280,6 +286,18 @@ select {
 
 .manual-note {
   max-width: 420px;
+}
+
+.workflow-goal {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #17201f;
+  background: #ffffff;
+  line-height: 1.45;
 }
 
 .toolbar {
@@ -469,6 +487,14 @@ pre {
   grid-template-columns: repeat(7, minmax(120px, 1fr));
   gap: 10px;
   overflow-x: auto;
+}
+
+.flow-pi_workflow {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+
+.flow-manual {
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
 }
 
 .flow-step {

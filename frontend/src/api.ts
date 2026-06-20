@@ -70,10 +70,21 @@ export const api = {
     sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
   bootstrapMachine: (machineId: string, payload: BootstrapPayload) =>
     sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, payload),
+  runPiEnvironmentWorkflow: (
+    machineId: string,
+    payload: { profile: string; dry_run: boolean; goal?: string }
+  ) =>
+    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, {
+      profile: payload.profile,
+      dry_run: payload.dry_run,
+      strategy: "pi_workflow",
+      pi_workflow_goal: payload.goal
+    }),
   confirmManualEnvironment: (machineId: string, note?: string) =>
     sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, {
       profile: "full",
       dry_run: true,
+      strategy: "manual",
       manual_environment: true,
       manual_environment_note: note
     }),

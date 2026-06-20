@@ -72,13 +72,19 @@ cd backend
 uv run uvicorn inflab.api.app:app --reload
 ```
 
-真实 SSH probe/bootstrap 是手动 opt-in 路径。先创建带凭据的 machine，然后显式传
-`dry_run=false`。
+环境接管默认推荐 `Pi 工作流`：用户用泛描述目标说明要达成的环境状态，由 Pi agent
+按 discover/plan/apply/verify/record 流程执行。默认 `dry_run=true` 只记录 workflow
+prompt、Pi executor plan 和审计结果；取消 dry-run 后才会把 prompt 交给配置好的 Pi
+command 执行。该路径不再假设一个固定 Ubuntu 脚本可以覆盖 CUDA、驱动、容器 runtime、
+镜像源、NAS、权限等真实分叉。
+
+固定脚本仍作为 `Scripted Baseline` 保留。真实 SSH scripted bootstrap 是手动 opt-in
+路径：先创建带凭据的 machine，然后显式传 `strategy=scripted` 和 `dry_run=false`。
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
   -H 'content-type: application/json' \
-  -d '{"profile":"minimal","dry_run":false}'
+  -d '{"profile":"minimal","strategy":"scripted","dry_run":false}'
 ```
 
 该路径使用 AsyncSSH 连接目标机，支持 password/private key、sudo command、timeout、
@@ -86,8 +92,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
 demo seed 仍不打开真实 SSH 连接。
 
 如果目标机环境已经由用户自行配置，可以在前端环境接管页面动态选择 `手动配置`。系统会
-跳过 B1-B7 自动配置，记录 `MANUAL_ENV` bootstrap run，并把机器标记为 `ready`，后续模型
-分发和 benchmark 可继续执行。
+跳过 Pi workflow 和 B1-B7 自动配置，记录 `MANUAL_ENV` bootstrap run，并把机器标记为
+`ready`，后续模型分发和 benchmark 可继续执行。
 
 使用数据库 demo 数据启动后端：
 
@@ -109,7 +115,7 @@ pnpm build
 ```
 
 当前前端只调用后端 API，不再导入本地 mock 数据。可直接操作数据库记录：新增机器、
-机器探测（dry-run 或真实 SSH）、bootstrap（dry-run 或真实 SSH）、注册/分发模型、
+机器探测（dry-run 或真实 SSH）、Pi workflow/scripted/manual 环境接管、注册/分发模型、
 预览调参候选、创建实验、提交 benchmark job（fake、remote inline、remote RQ）、
 轮询 job logs、查看 trial/log/metrics，并生成/导出报告 artifact 记录。空库可在页面点击
 `Seed DB`，或调用
@@ -158,8 +164,9 @@ make pm2-start-all
 外部 LLM candidate provider 使用 LiteLLM。默认 `INFLAB_LLM_PROVIDER=disabled`；也可在
 实验创建页右侧的 `Agent Settings` 面板动态配置 OpenAI-compatible / Anthropic provider、
 Base URL、Model、API Key，以及 Pi agent command/work dir/round/timeout。UI 保存的配置会
-持久化到数据库并覆盖环境变量默认值；API Key 加密保存且不回显。标准模式不依赖这些配置，
-只有智能模式会使用。候选参数仍会先经过 Pydantic schema 校验和启发式剪枝。
+持久化到数据库并覆盖环境变量默认值；API Key 加密保存且不回显。LLM 配置只影响智能候选；
+Pi 配置会用于环境接管 workflow 和后续智能模式 worker。标准模式矩阵规划不依赖这些配置。
+候选参数仍会先经过 Pydantic schema 校验和启发式剪枝。
 
 ## E2E Status
 

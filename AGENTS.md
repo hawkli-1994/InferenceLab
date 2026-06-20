@@ -105,6 +105,16 @@ Preserve these constraints in code and docs:
 Use these once the corresponding code exists:
 
 ```bash
+make install
+make test
+make lint
+make format-check
+make frontend-build
+```
+
+These targets wrap the underlying commands:
+
+```bash
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
@@ -117,6 +127,20 @@ pnpm test
 pnpm lint
 pnpm build
 ```
+
+PM2 local process targets are available for development:
+
+```bash
+make pm2-start
+make pm2-worker
+make status
+make logs-api
+make logs-ui
+make pm2-stop
+```
+
+`make pm2-start` starts only the API and frontend. `make pm2-worker` or
+`make pm2-start-all` requires Redis and enables the RQ worker path.
 
 If these commands are not yet available because the scaffold has not been created, say that clearly in the final response instead of pretending they ran.
 

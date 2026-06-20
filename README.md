@@ -36,10 +36,23 @@ SSH、远程 benchmark、对象存储和外部 LLM 都需要显式 opt-in。
 
 后端默认测试不依赖真实 SSH、GPU、NAS、Docker daemon mutation、外部 LLM 或真实模型下载。
 
+安装后端、前端和 PM2 依赖：
+
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+make install
+```
+
+该 target 会运行 `uv sync --all-extras --dev`、`pnpm install`，并在本机没有 PM2 时执行
+`npm install -g pm2`。如果不希望修改全局 Node 环境，可以分别运行
+`make install-backend` 和 `make install-frontend`，手动安装 PM2。
+
+常用质量检查：
+
+```bash
+make test
+make lint
+make format-check
+make frontend-build
 ```
 
 Docker Compose 单机栈：
@@ -102,6 +115,32 @@ pnpm build
 ```bash
 VITE_API_BASE=http://127.0.0.1:18000/api/v1 pnpm dev -- --port 5174
 ```
+
+PM2 本地开发进程：
+
+```bash
+make pm2-start
+make status
+make logs-api
+make logs-ui
+make pm2-stop
+```
+
+`make pm2-start` 默认只启动 `inflab-api` 和 `inflab-frontend`。API 使用
+`http://127.0.0.1:8000`，Vite 前端使用 `http://127.0.0.1:5173`。PM2 配置位于
+`deploy/pm2/ecosystem.config.cjs`，默认使用 `backend/inflab-dev.db` SQLite、本地 schema
+auto-create、demo seed 和同步队列，适合快速开发。
+
+需要 Redis/RQ worker 时先启动 Redis，再运行：
+
+```bash
+make pm2-worker
+# or start API, frontend, and worker together
+make pm2-start-all
+```
+
+可通过 `INFLAB_DATABASE_URL`、`INFLAB_REDIS_URL`、`INFLAB_REDIS_JOB_MODE`、
+`INFLAB_API_PORT`、`INFLAB_UI_PORT`、`VITE_API_BASE` 等环境变量覆盖 PM2 默认值。
 
 真实推理仍不默认执行，但后端已有 vLLM/SGLang benchmark command-plan 和 opt-in
 远程执行路径：

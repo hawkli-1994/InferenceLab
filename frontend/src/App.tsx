@@ -175,19 +175,31 @@ function MachinesView({ machines }: { machines: Machine[] }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [probeDryRun, setProbeDryRun] = useState(true);
+  const [credentialType, setCredentialType] = useState<"password" | "private_key" | "ssh_agent">(
+    "password"
+  );
   const createMachine = useMutation({
-    mutationFn: (formData: FormData) =>
-      api.createMachine({
+    mutationFn: (formData: FormData) => {
+      const credential_type = String(formData.get("credential_type") ?? "password") as
+        | "password"
+        | "private_key"
+        | "ssh_agent";
+      const secret = String(formData.get("secret") ?? "").trim();
+      return api.createMachine({
         name: String(formData.get("name") ?? "lab-a100-02"),
         host: String(formData.get("host") ?? "10.0.0.11"),
         port: numberValue(formData.get("port"), 22),
         username: String(formData.get("username") ?? "seed"),
         runtime_mode: String(formData.get("runtime_mode") ?? "both") as RuntimeMode,
-        credential: {
-          credential_type: "password",
-          secret: String(formData.get("secret") ?? "seed")
-        }
-      }),
+        credential:
+          credential_type === "ssh_agent"
+            ? { credential_type }
+            : {
+                credential_type,
+                secret: secret || "seed"
+              }
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["machines"] })
   });
   const probeMachine = useMutation({
@@ -251,9 +263,33 @@ function MachinesView({ machines }: { machines: Machine[] }) {
             <input name="port" type="number" min="1" max="65535" defaultValue="22" />
           </label>
           <label>
-            {t("password")}
-            <input name="secret" type="password" defaultValue="seed" />
+            {t("credentialType")}
+            <select
+              name="credential_type"
+              value={credentialType}
+              onChange={(event) =>
+                setCredentialType(
+                  event.target.value as "password" | "private_key" | "ssh_agent"
+                )
+              }
+            >
+              <option value="password">{t("passwordAuth")}</option>
+              <option value="private_key">{t("privateKeyAuth")}</option>
+              <option value="ssh_agent">{t("sshAgentAuth")}</option>
+            </select>
           </label>
+          {credentialType !== "ssh_agent" ? (
+            <label>
+              {credentialType === "private_key" ? t("privateKey") : t("password")}
+              <input
+                name="secret"
+                type={credentialType === "private_key" ? "text" : "password"}
+                defaultValue="seed"
+              />
+            </label>
+          ) : (
+            <span className="form-note">{t("sshAgentNote")}</span>
+          )}
           <label>
             {t("runtime")}
             <select name="runtime_mode" defaultValue="both">

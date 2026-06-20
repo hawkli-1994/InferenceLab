@@ -73,8 +73,18 @@ class Page(BaseModel):
 
 
 class SSHCredential(BaseModel):
-    credential_type: Literal["password", "private_key"] = "password"
-    secret: str = Field(min_length=1)
+    credential_type: Literal["password", "private_key", "ssh_agent"] = "password"
+    secret: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def secret_matches_credential_type(self) -> SSHCredential:
+        if self.credential_type == "ssh_agent":
+            if self.secret:
+                raise ValueError("ssh_agent authentication must not include a secret")
+            return self
+        if not self.secret:
+            raise ValueError("password and private_key authentication require a secret")
+        return self
 
 
 class MachineCreate(BaseModel):

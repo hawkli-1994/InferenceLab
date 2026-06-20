@@ -87,9 +87,17 @@ curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
   -d '{"profile":"minimal","strategy":"scripted","dry_run":false}'
 ```
 
-该路径使用 AsyncSSH 连接目标机，支持 password/private key、sudo command、timeout、
-远端 cwd/env、SFTP upload/download，以及 benchmark stdout/stderr 流式读取。默认测试和
-demo seed 仍不打开真实 SSH 连接。
+该路径使用 AsyncSSH 连接目标机，支持 password/private key/显式 `ssh_agent`、sudo
+command、timeout、远端 cwd/env、SFTP upload/download，以及 benchmark stdout/stderr
+流式读取。默认测试和 demo seed 仍不打开真实 SSH 连接。
+
+真实 SSH 只读 smoke 可通过环境变量手动运行：
+
+```bash
+INFLAB_REAL_SSH_TARGET=rx@172.18.1.239 uv run pytest backend/tests/test_real_ssh_opt_in.py
+```
+
+该 smoke 只执行 `id -un && hostname && uname -srm`，不会写文件、上传数据、sudo 或修改机器配置。
 
 旧的 `manual_environment` 旁路已移除。环境状态必须由 Pi workflow 的执行记录或显式
 scripted baseline 结果支撑，避免把未经验证的人工声明误标为 `ready`。

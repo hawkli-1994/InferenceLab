@@ -166,6 +166,7 @@
 mutation 的功能推进。真实 SSH 路径可以手动 opt-in，但不作为默认测试前提。
 
 - [x] 实现真实 AsyncSSH executor：password/private key、host key policy、cwd/env/sudo/timeout、SFTP upload/download。
+- [x] 支持显式 `ssh_agent` 机器凭据，并用 `rx@172.18.1.239` 完成只读 SSH smoke。
 - [x] 将 `POST /api/v1/machines/{machine_id}/bootstrap` 的 `dry_run=false` 接入真实 AsyncSSH executor。
 - [x] 为真实 SSH executor 增加 mock AsyncSSH 单元测试，不依赖真实机器。
 - [x] 新增实验候选预览 API：`POST /api/v1/experiments/plan`。

@@ -165,6 +165,24 @@ def test_real_ssh_bootstrap_requires_stored_credential(client: TestClient) -> No
     )
 
 
+def test_machine_can_record_explicit_ssh_agent_auth(client: TestClient) -> None:
+    machine_response = client.post(
+        "/api/v1/machines",
+        json={
+            "name": "agent-auth",
+            "host": "172.18.1.239",
+            "username": "rx",
+            "runtime_mode": "both",
+            "credential": {"credential_type": "ssh_agent"},
+        },
+    )
+
+    assert machine_response.status_code == 201
+    machine = machine_response.json()
+    assert machine["credential_type"] == "ssh_agent"
+    assert machine["credential"] == "ssh_agent"
+
+
 def test_legacy_manual_environment_payload_is_rejected(client: TestClient) -> None:
     machine_response = client.post(
         "/api/v1/machines",

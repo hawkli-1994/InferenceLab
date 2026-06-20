@@ -150,8 +150,8 @@ export interface MachineCreatePayload {
   username: string;
   runtime_mode: RuntimeMode;
   credential?: {
-    credential_type: "password" | "private_key";
-    secret: string;
+    credential_type: "password" | "private_key" | "ssh_agent";
+    secret?: string;
   };
 }
 

@@ -29,7 +29,7 @@ opt-in paths.
 
 `AsyncSSHExecutor` is implemented for manual opt-in machine operations. It supports:
 
-- password and PEM private-key authentication;
+- password, PEM private-key, and explicit `ssh_agent` authentication;
 - strict or permissive host-key policy from `INFLAB_SSH_KNOWN_HOSTS_POLICY`;
 - remote command execution with cwd/env/sudo/timeout;
 - SFTP upload and download.
@@ -39,8 +39,16 @@ network/disk data through SSH. `POST /api/v1/machines/{machine_id}/bootstrap` us
 executor when `dry_run=true`; when `dry_run=false`, it decrypts the machine credential and runs
 B1-B7 through AsyncSSH.
 
-This path is not covered by real-machine E2E yet; unit tests mock AsyncSSH and verify the command,
-credential, timeout, SFTP, and streaming behavior.
+This path is not covered by required real-machine E2E yet; unit tests mock AsyncSSH and verify the
+command, credential, timeout, SFTP, and streaming behavior. A read-only opt-in smoke test is
+available with:
+
+```bash
+INFLAB_REAL_SSH_TARGET=rx@172.18.1.239 uv run pytest backend/tests/test_real_ssh_opt_in.py
+```
+
+The smoke test only runs `id -un && hostname && uname -srm`; it does not write files, upload data,
+use sudo, or change machine configuration.
 
 ## Real Benchmark and Artifact Paths
 

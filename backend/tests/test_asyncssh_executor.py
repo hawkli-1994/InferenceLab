@@ -189,6 +189,31 @@ async def test_asyncssh_executor_supports_private_key_and_sftp(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_asyncssh_executor_supports_ssh_agent_auth(monkeypatch) -> None:
+    fake_asyncssh = FakeAsyncSSH()
+    monkeypatch.setattr("inflab.executor.asyncssh", fake_asyncssh)
+    executor = AsyncSSHExecutor(
+        SSHConnectionConfig(
+            host="host.example",
+            username="seed",
+            credential_type="ssh_agent",
+            secret=None,
+            known_hosts_policy="permissive",
+        )
+    )
+
+    result = await executor.run(CommandRecord(command="id -un && hostname"))
+
+    assert result.exit_code == 0
+    assert fake_asyncssh.connects[0]["kwargs"] == {
+        "port": 22,
+        "username": "seed",
+        "connect_timeout": 30,
+        "known_hosts": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_asyncssh_executor_reports_invalid_environment(monkeypatch) -> None:
     fake_asyncssh = FakeAsyncSSH()
     monkeypatch.setattr("inflab.executor.asyncssh", fake_asyncssh)

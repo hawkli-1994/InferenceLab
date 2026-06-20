@@ -134,6 +134,11 @@ def _fake_machine_profile(machine: Machine) -> dict[str, Any]:
 
 
 def _machine_read(machine: Machine) -> MachineRead:
+    credential_status = (
+        "ssh_agent"
+        if machine.credential_type == "ssh_agent"
+        else mask_secret(machine.encrypted_credential)
+    )
     return MachineRead(
         id=machine.id,
         name=machine.name,
@@ -141,7 +146,7 @@ def _machine_read(machine: Machine) -> MachineRead:
         port=machine.port,
         username=machine.username,
         credential_type=machine.credential_type,
-        credential=mask_secret(machine.encrypted_credential),
+        credential=credential_status,
         status=machine.status,
         runtime_mode=RuntimeMode(machine.runtime_mode),
         machine_profile=machine.machine_profile,
@@ -664,13 +669,17 @@ def _experiment_plan(
 
 
 def _ssh_executor_for_machine(machine: Machine) -> AsyncSSHExecutor:
-    if not machine.encrypted_credential:
+    settings = get_settings()
+    secret = None
+    if machine.credential_type == "ssh_agent":
+        secret = None
+    elif not machine.encrypted_credential:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="machine has no SSH credential configured",
         )
-    settings = get_settings()
-    secret = decrypt_secret(machine.encrypted_credential, settings.secret_key)
+    else:
+        secret = decrypt_secret(machine.encrypted_credential, settings.secret_key)
     return AsyncSSHExecutor(
         SSHConnectionConfig(
             host=machine.host,
@@ -780,10 +789,10 @@ def list_machines(
 def create_machine(payload: MachineCreate, session: Session = Depends(get_session)) -> MachineRead:
     credential_type = payload.credential.credential_type if payload.credential else "password"
     encrypted = None
-    if payload.credential:
+    if payload.credential and payload.credential.credential_type != "ssh_agent":
         from inflab.config import get_settings
 
-        encrypted = encrypt_secret(payload.credential.secret, get_settings().secret_key)
+        encrypted = encrypt_secret(payload.credential.secret or "", get_settings().secret_key)
     machine = Machine(
         name=payload.name,
         host=payload.host,
@@ -826,9 +835,13 @@ def update_machine(
         from inflab.config import get_settings
 
         machine.credential_type = credential["credential_type"]
-        machine.encrypted_credential = encrypt_secret(
-            credential["secret"], get_settings().secret_key
-        )
+        if credential["credential_type"] == "ssh_agent":
+            machine.encrypted_credential = None
+        else:
+            machine.encrypted_credential = encrypt_secret(
+                credential["secret"],
+                get_settings().secret_key,
+            )
     session.commit()
     session.refresh(machine)
     return _machine_read(machine)

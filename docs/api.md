@@ -64,12 +64,21 @@ Scripted Baseline keeps a reproducible fixed profile. A Pi workflow dry-run mark
 `agent_workflow_planned`; only successful non-dry-run execution marks it `ready`.
 
 The real SSH executor supports remote command execution with cwd/env/sudo/timeout plus SFTP
-upload/download. Password and PEM private-key credentials are supported. Host-key behavior follows
-`INFLAB_SSH_KNOWN_HOSTS_POLICY`: `permissive` passes `known_hosts=None`; `strict` uses AsyncSSH's
-normal known-hosts behavior.
+upload/download. Password, PEM private-key, and explicit `ssh_agent` credentials are supported.
+Host-key behavior follows `INFLAB_SSH_KNOWN_HOSTS_POLICY`: `permissive` passes `known_hosts=None`;
+`strict` uses AsyncSSH's normal known-hosts behavior.
 
-This is implementation-complete for manual smoke tests but intentionally lacks real-machine E2E in
-this repository state.
+`ssh_agent` is explicit: a machine must be created with
+`{"credential":{"credential_type":"ssh_agent"}}`. A machine with no credential still rejects
+`dry_run=false` SSH operations, so the API does not accidentally try the backend process agent
+against arbitrary hosts.
+
+This is implementation-complete for manual smoke tests but intentionally lacks required
+real-machine E2E in this repository state. The opt-in read-only smoke command is:
+
+```bash
+INFLAB_REAL_SSH_TARGET=rx@172.18.1.239 uv run pytest backend/tests/test_real_ssh_opt_in.py
+```
 
 ## Model Distribution and Artifacts
 

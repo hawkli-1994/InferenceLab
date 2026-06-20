@@ -11,7 +11,7 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 - Artifacts: report/log/snapshot/metrics/model/image references plus S3-compatible text upload.
 - Jobs: synchronous fake queue and Redis/RQ queue adapter with status, progress, logs, and result.
 - Benchmarks: RunSpec, fake benchmark job, normalized metrics, vLLM/SGLang command planning, opt-in remote inline/RQ execution.
-- Experiments: standard/intelligent mode candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data.
+- Experiments: standard/intelligent mode candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data, company-format table reports.
 - Plugins: runtime/framework/driver/model plugin registry.
 - AutoResearch: `GET /api/v1/autoresearch/integration-plan` exposes the Deli_AutoResearch intelligent-mode protocol boundary.
 - Agent settings: `GET/PUT /api/v1/agent-settings` persists LLM provider and Pi executor configuration; `/validate` checks a draft config without saving secrets.
@@ -160,6 +160,25 @@ workbench, or use environment variables as process defaults:
 Returned parameter sets are parsed as JSON, validated as `FrameworkParams`, and then passed through
 the existing heuristic pruning before any launch command is generated.
 
+## Company-Format Result Table
+
+After an experiment has completed trials and written metrics, the default result table is available
+through:
+
+- `GET /api/v1/experiments/{experiment_id}/company-report`
+- `GET /api/v1/experiments/{experiment_id}/company-report/export`
+
+The JSON endpoint returns `columns` plus ordered `rows`. The CSV export uses the same columns in this
+exact order:
+
+```text
+测试时间,机型,GPU,模型,精度,物理卡数,逻辑卡数,模式,请求并发数,输入,输出,总输入,总输出,请求吞吐,输出吞吐,总吞吐,首Token延时(ms),每Token延时(ms),总耗时(s),平均每用户输出吞吐,备注
+```
+
+Rows are derived from the recorded experiment, machine profile, model record, trial params, benchmark
+result, and metrics summary. Missing workload facts fall back to the current default synthetic
+benchmark workload so default tests remain self-contained.
+
 ## Current Forward Slice
 
 The workbench now has a database-backed interactive launch path:
@@ -173,6 +192,7 @@ The workbench now has a database-backed interactive launch path:
 - create an experiment with validated candidate params and generated trial logs;
 - submit fake, remote inline, or remote RQ benchmark jobs and poll job logs;
 - inspect `GET /api/v1/experiments/{experiment_id}/run-log`;
+- inspect the default company-format table result and export it as CSV;
 - list generated reports through `GET /api/v1/reports`;
 - request report downloads and view artifact rows.
 

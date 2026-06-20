@@ -29,6 +29,7 @@ import type {
   AgentSettingsUpdate,
   BenchmarkKind,
   BootstrapRun,
+  CompanyReport,
   DiscoverySession,
   ExecutionMode,
   Experiment,
@@ -96,6 +97,18 @@ function previewText(value: string, limit = 220) {
     return trimmed || "none";
   }
   return `${trimmed.slice(0, limit)}...`;
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function runSpecFromExperiment(experiment: Experiment) {
@@ -913,6 +926,7 @@ function ExperimentsView({
       queryClient.invalidateQueries({ queryKey: ["metrics", experiment.id] });
       queryClient.invalidateQueries({ queryKey: ["trials", experiment.id] });
       queryClient.invalidateQueries({ queryKey: ["run-log", experiment.id] });
+      queryClient.invalidateQueries({ queryKey: ["company-report", experiment.id] });
     }
   });
   const buildPayload = (formData: FormData): ExperimentCreatePayload => ({
@@ -1189,6 +1203,64 @@ function MetricsChart({ metrics }: { metrics: MetricsSummary[] }) {
   return <div ref={chartRef} className="chart" />;
 }
 
+function CompanyReportTable({
+  report,
+  onExport,
+  exporting
+}: {
+  report?: CompanyReport;
+  onExport: () => void;
+  exporting: boolean;
+}) {
+  const { t } = useI18n();
+  const columns = report?.columns ?? [];
+  const rows = report?.rows ?? [];
+  return (
+    <div className="panel table-panel company-report-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>{t("companyReport")}</h2>
+          <p>{t("companyReportDesc")}</p>
+        </div>
+        <button
+          className="secondary"
+          type="button"
+          disabled={rows.length === 0 || exporting}
+          onClick={onExport}
+        >
+          <Download size={16} /> {exporting ? t("running") : t("exportCsv")}
+        </button>
+      </div>
+      <div className="company-report-scroll">
+        <table className="company-report-table">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column}>{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={Math.max(columns.length, 1)}>{t("noCompanyReportRows")}</td>
+              </tr>
+            ) : (
+              rows.map((row, index) => (
+                <tr key={`${report?.experiment_id}-${index}`}>
+                  {columns.map((column) => (
+                    <td key={column}>{String(row[column] ?? "")}</td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function RunsView({
   experiment,
   metrics,
@@ -1204,6 +1276,11 @@ function RunsView({
   const queryClient = useQueryClient();
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("fake");
   const [benchmarkKind, setBenchmarkKind] = useState<BenchmarkKind>("serve");
+  const companyReport = useQuery({
+    queryKey: ["company-report", experiment?.id],
+    queryFn: () => api.companyReport(experiment?.id ?? ""),
+    enabled: Boolean(experiment)
+  });
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: api.jobs,
@@ -1218,6 +1295,18 @@ function RunsView({
     queryFn: () => api.jobLogs(latestJob?.id ?? ""),
     enabled: Boolean(latestJob),
     refetchInterval: latestJob && ["queued", "running"].includes(latestJob.status) ? 3000 : false
+  });
+  const exportCompanyReport = useMutation({
+    mutationFn: () => {
+      if (!experiment) {
+        throw new Error("No experiment selected");
+      }
+      return api.exportCompanyReportCsv(experiment.id);
+    },
+    onSuccess: (csvText) => {
+      const safeName = (experiment?.name ?? "company-report").replace(/[^A-Za-z0-9_.-]+/g, "_");
+      downloadTextFile(`${safeName}.csv`, csvText, "text/csv;charset=utf-8");
+    }
   });
   const createBenchmark = useMutation({
     mutationFn: (formData: FormData) => {
@@ -1254,6 +1343,11 @@ function RunsView({
         </div>
         {experiment ? <StatusPill status={experiment.status} /> : null}
       </header>
+      <CompanyReportTable
+        report={companyReport.data}
+        exporting={exportCompanyReport.isPending}
+        onExport={() => exportCompanyReport.mutate()}
+      />
       <div className="split">
         <div className="panel">
           <h2>{t("metrics")}</h2>

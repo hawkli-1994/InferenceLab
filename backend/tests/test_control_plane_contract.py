@@ -60,6 +60,8 @@ def test_openapi_schema_exposes_mvp_routes(client: TestClient) -> None:
         "/api/v1/experiments/plan",
         "/api/v1/experiments",
         "/api/v1/experiments/{experiment_id}/run-log",
+        "/api/v1/experiments/{experiment_id}/company-report",
+        "/api/v1/experiments/{experiment_id}/company-report/export",
         "/api/v1/experiments/{experiment_id}/reports",
         "/api/v1/reports",
         "/api/v1/plugins",
@@ -404,6 +406,63 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
     metrics_response = client.get(f"/api/v1/experiments/{experiment['id']}/metrics")
     assert metrics_response.status_code == 200
     assert len(metrics_response.json()) == 2
+
+    company_report_response = client.get(f"/api/v1/experiments/{experiment['id']}/company-report")
+    assert company_report_response.status_code == 200
+    company_report = company_report_response.json()
+    assert company_report["columns"] == [
+        "测试时间",
+        "机型",
+        "GPU",
+        "模型",
+        "精度",
+        "物理卡数",
+        "逻辑卡数",
+        "模式",
+        "请求并发数",
+        "输入",
+        "输出",
+        "总输入",
+        "总输出",
+        "请求吞吐",
+        "输出吞吐",
+        "总吞吐",
+        "首Token延时(ms)",
+        "每Token延时(ms)",
+        "总耗时(s)",
+        "平均每用户输出吞吐",
+        "备注",
+    ]
+    assert len(company_report["rows"]) == 2
+    first_report_row = company_report["rows"][0]
+    assert first_report_row["机型"] == "lab-a100-01"
+    assert first_report_row["GPU"] == "MockGPU"
+    assert first_report_row["模型"] == "Qwen3-32B"
+    assert first_report_row["精度"] == "bfloat16"
+    assert first_report_row["物理卡数"] == 4
+    assert first_report_row["逻辑卡数"] == 1
+    assert first_report_row["模式"] == "container"
+    assert first_report_row["请求并发数"] == 1
+    assert first_report_row["输入"] == 1024
+    assert first_report_row["输出"] == 256
+    assert first_report_row["总输入"] == 131072
+    assert first_report_row["总输出"] == 32768
+    assert first_report_row["请求吞吐"] > 0
+    assert first_report_row["输出吞吐"] > 0
+    assert first_report_row["总吞吐"] > 0
+    assert first_report_row["首Token延时(ms)"] == 110
+    assert first_report_row["每Token延时(ms)"] == 18
+    assert first_report_row["总耗时(s)"] > 0
+    assert first_report_row["平均每用户输出吞吐"] > 0
+    assert "trial 1" in first_report_row["备注"]
+
+    company_report_csv = client.get(f"/api/v1/experiments/{experiment['id']}/company-report/export")
+    assert company_report_csv.status_code == 200
+    assert company_report_csv.headers["content-type"].startswith("text/csv")
+    assert company_report_csv.text.lstrip("\ufeff").splitlines()[0] == ",".join(
+        company_report["columns"]
+    )
+    assert "Qwen3-32B" in company_report_csv.text
 
     run_log_response = client.get(f"/api/v1/experiments/{experiment['id']}/run-log")
     assert run_log_response.status_code == 200

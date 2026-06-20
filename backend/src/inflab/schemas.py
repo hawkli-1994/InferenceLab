@@ -516,6 +516,12 @@ class MetricsSummaryRead(BaseModel):
     metrics: dict[str, Any]
 
 
+class CompanyReportRead(BaseModel):
+    experiment_id: str
+    columns: list[str]
+    rows: list[dict[str, str | int | float]]
+
+
 class ExperimentRunLogRead(BaseModel):
     experiment_id: str
     lines: list[str]

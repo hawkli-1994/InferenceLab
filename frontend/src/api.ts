@@ -6,6 +6,7 @@ import type {
   BootstrapPayload,
   BenchmarkJobPayload,
   BootstrapRun,
+  CompanyReport,
   DiscoverySession,
   Experiment,
   ExperimentCreatePayload,
@@ -39,6 +40,14 @@ async function getJson<T>(path: string): Promise<T> {
   return data as T;
 }
 
+async function getText(path: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
 async function sendJson<T>(path: string, body: unknown = {}, method = "POST"): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method,
@@ -59,6 +68,10 @@ export const api = {
   experiments: () => getJson<Experiment[]>("/experiments"),
   trials: (experimentId: string) => getJson<Trial[]>(`/experiments/${experimentId}/trials`),
   metrics: (experimentId: string) => getJson<MetricsSummary[]>(`/experiments/${experimentId}/metrics`),
+  companyReport: (experimentId: string) =>
+    getJson<CompanyReport>(`/experiments/${experimentId}/company-report`),
+  exportCompanyReportCsv: (experimentId: string) =>
+    getText(`/experiments/${experimentId}/company-report/export`),
   reports: (experimentId?: string) =>
     getJson<ReportRecord[]>(experimentId ? `/reports?experiment_id=${experimentId}` : "/reports"),
   seedDemoData: () => sendJson<Record<string, number>>("/dev/seed-demo-data"),

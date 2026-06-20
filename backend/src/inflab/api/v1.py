@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,6 +26,11 @@ from inflab.benchmark import (
     run_remote_benchmark,
 )
 from inflab.benchmark_artifacts import persist_remote_benchmark_artifacts
+from inflab.company_report import (
+    COMPANY_REPORT_COLUMNS,
+    build_company_report_rows,
+    render_company_report_csv,
+)
 from inflab.config import AgentExecutorSettings, LLMProviderSettings, get_settings
 from inflab.db.models import (
     AgentRuntimeSettings,
@@ -67,6 +72,7 @@ from inflab.schemas import (
     BootstrapRunRead,
     CommandRecord,
     CommandResult,
+    CompanyReportRead,
     DiscoverySessionRead,
     EnvironmentSetupStrategy,
     ExperimentCreate,
@@ -661,6 +667,42 @@ def _metrics_read(metrics: MetricsSummary) -> MetricsSummaryRead:
         requests_per_second=metrics.requests_per_second,
         failure_rate=metrics.failure_rate,
         metrics=metrics.metrics,
+    )
+
+
+def _company_report_read(experiment_id: str, session: Session) -> CompanyReportRead:
+    experiment = session.get(Experiment, experiment_id)
+    if experiment is None:
+        raise _not_found("experiment")
+    machine = session.get(Machine, experiment.machine_id)
+    model = session.get(ModelRecord, experiment.model_id)
+    if machine is None:
+        raise _not_found("machine")
+    if model is None:
+        raise _not_found("model")
+    trials = session.scalars(
+        select(ExperimentTrial).where(ExperimentTrial.experiment_id == experiment_id)
+    ).all()
+    trials_by_id = {trial.id: trial for trial in trials}
+    trial_order = {trial.id: trial.trial_index for trial in trials}
+    metrics = session.scalars(
+        select(MetricsSummary).where(MetricsSummary.experiment_id == experiment_id)
+    ).all()
+    ordered_metrics = sorted(
+        metrics,
+        key=lambda row: trial_order.get(row.trial_id or "", 0),
+    )
+    rows = build_company_report_rows(
+        experiment=experiment,
+        machine=machine,
+        model=model,
+        metrics=ordered_metrics,
+        trials_by_id=trials_by_id,
+    )
+    return CompanyReportRead(
+        experiment_id=experiment.id,
+        columns=COMPANY_REPORT_COLUMNS,
+        rows=rows,
     )
 
 
@@ -1467,12 +1509,36 @@ def create_experiment(
         candidate_params = FrameworkParams.model_validate(candidate.params)
         candidate_spec = payload.run_spec.model_copy(update={"framework_params": candidate_params})
         result = fake_benchmark_result(candidate_spec)
-        metrics = normalize_metrics(result)
+        summary_metrics = normalize_metrics(result)
+        input_tokens = 1024
+        output_tokens = 256
+        total_output_tokens = output_tokens * result.success_count
+        output_throughput = summary_metrics["tokens_per_second"]
+        total_duration_s = (
+            round(total_output_tokens / output_throughput, 2) if output_throughput > 0 else 0.0
+        )
+        metrics = {
+            **summary_metrics,
+            "request_count": result.request_count,
+            "success_count": result.success_count,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_input_tokens": input_tokens * result.request_count,
+            "total_output_tokens": total_output_tokens,
+            "request_concurrency": candidate_params.max_num_seqs,
+            "total_duration_s": total_duration_s,
+            "total_token_throughput": round(
+                (input_tokens * result.request_count + total_output_tokens) / total_duration_s,
+                2,
+            )
+            if total_duration_s > 0
+            else output_throughput,
+        }
         trial_logs = [
             f"trial {candidate.trial_index} started",
             f"launch: {candidate.launch_command}",
             f"trial {candidate.trial_index} succeeded",
-            f"tokens_per_second={metrics['tokens_per_second']}",
+            f"tokens_per_second={summary_metrics['tokens_per_second']}",
         ]
         trial = ExperimentTrial(
             experiment_id=experiment.id,
@@ -1493,7 +1559,7 @@ def create_experiment(
                 experiment_id=experiment.id,
                 trial_id=trial.id,
                 metrics=metrics,
-                **metrics,
+                **summary_metrics,
             )
         )
         session.add(
@@ -1502,7 +1568,7 @@ def create_experiment(
                 trial_id=trial.id,
                 metrics={
                     "gpu_utilization": 0.88,
-                    "tokens_per_second": metrics["tokens_per_second"],
+                    "tokens_per_second": summary_metrics["tokens_per_second"],
                 },
             )
         )
@@ -1626,6 +1692,33 @@ def list_metrics(
         select(MetricsSummary).where(MetricsSummary.experiment_id == experiment_id)
     ).all()
     return [_metrics_read(row) for row in rows]
+
+
+@router.get("/experiments/{experiment_id}/company-report", response_model=CompanyReportRead)
+def get_company_report(
+    experiment_id: str,
+    session: Session = Depends(get_session),
+) -> CompanyReportRead:
+    return _company_report_read(experiment_id, session)
+
+
+@router.get("/experiments/{experiment_id}/company-report/export")
+def export_company_report(
+    experiment_id: str,
+    format: str = Query(default="csv", pattern="^csv$"),
+    session: Session = Depends(get_session),
+) -> Response:
+    report = _company_report_read(experiment_id, session)
+    csv_text = render_company_report_csv(report.rows)
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="company-report-{experiment_id}.{format}"'
+            )
+        },
+    )
 
 
 @router.get("/experiments/{experiment_id}/chart-data", response_model=dict[str, Any])

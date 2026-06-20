@@ -325,6 +325,12 @@ export interface MetricsSummary {
   metrics: Record<string, unknown>;
 }
 
+export interface CompanyReport {
+  experiment_id: string;
+  columns: string[];
+  rows: Array<Record<string, string | number>>;
+}
+
 export interface ReportRecord {
   id: string;
   experiment_id: string;

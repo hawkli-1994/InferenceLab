@@ -433,6 +433,37 @@ select {
   overflow-x: auto;
 }
 
+.company-report-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.company-report-scroll {
+  overflow-x: auto;
+}
+
+.company-report-table {
+  min-width: 2100px;
+  table-layout: fixed;
+}
+
+.company-report-table th,
+.company-report-table td {
+  width: 100px;
+  vertical-align: top;
+}
+
+.company-report-table th:first-child,
+.company-report-table td:first-child {
+  width: 190px;
+}
+
+.company-report-table th:nth-child(21),
+.company-report-table td:nth-child(21) {
+  width: 220px;
+  white-space: normal;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -128,7 +128,9 @@ pnpm build
 当前前端只调用后端 API，不再导入本地 mock 数据。可直接操作数据库记录：新增机器、
 机器探测（dry-run 或真实 SSH）、Pi workflow/scripted 环境接管、注册/分发模型、
 预览调参候选、创建实验、提交 benchmark job（fake、remote inline、remote RQ）、
-轮询 job logs、查看 trial/log/metrics，并生成/导出报告 artifact 记录。空库可在页面点击
+轮询 job logs、查看 trial/log/metrics，默认展示公司格式结果表
+（测试时间、机型、GPU、模型、精度、物理/逻辑卡数、吞吐、延迟等列）并导出 CSV，
+也可以生成/导出报告 artifact 记录。空库可在页面点击
 `Seed DB`，或调用
 `POST /api/v1/dev/seed-demo-data`。
 如果后端不在默认 `http://127.0.0.1:8000`，可用 `VITE_API_BASE` 指向目标 API：

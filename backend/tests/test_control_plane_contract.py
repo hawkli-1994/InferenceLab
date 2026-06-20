@@ -156,7 +156,7 @@ def test_real_ssh_bootstrap_requires_stored_credential(client: TestClient) -> No
 
     bootstrap_response = client.post(
         f"/api/v1/machines/{machine['id']}/bootstrap",
-        json={"profile": "minimal", "dry_run": False},
+        json={"profile": "minimal", "strategy": "scripted", "dry_run": False},
     )
 
     assert bootstrap_response.status_code == 400
@@ -165,13 +165,11 @@ def test_real_ssh_bootstrap_requires_stored_credential(client: TestClient) -> No
     )
 
 
-def test_manual_environment_bootstrap_bypasses_ssh_and_marks_machine_ready(
-    client: TestClient,
-) -> None:
+def test_legacy_manual_environment_payload_is_rejected(client: TestClient) -> None:
     machine_response = client.post(
         "/api/v1/machines",
         json={
-            "name": "manual-env",
+            "name": "legacy-manual-env",
             "host": "10.0.0.88",
             "username": "seed",
             "runtime_mode": "both",
@@ -190,17 +188,8 @@ def test_manual_environment_bootstrap_bypasses_ssh_and_marks_machine_ready(
         },
     )
 
-    assert bootstrap_response.status_code == 200
-    bootstrap = bootstrap_response.json()
-    assert bootstrap["status"] == "succeeded"
-    assert bootstrap["modules"] == ["MANUAL_ENV"]
-    assert bootstrap["step_results"][0]["status"] == "skipped"
-    assert bootstrap["step_results"][0]["snapshots"]["automatic_bootstrap_executed"] is False
-    assert "site admin" in bootstrap["step_results"][0]["phase_results"]["detect"]["stdout"]
-
-    machine_after = client.get(f"/api/v1/machines/{machine['id']}")
-    assert machine_after.status_code == 200
-    assert machine_after.json()["status"] == "ready"
+    assert bootstrap_response.status_code == 422
+    assert "manual_environment" in bootstrap_response.text
 
 
 def test_pi_environment_workflow_records_generic_agent_handoff(
@@ -223,7 +212,6 @@ def test_pi_environment_workflow_records_generic_agent_handoff(
         json={
             "profile": "full",
             "dry_run": True,
-            "strategy": "pi_workflow",
             "pi_workflow_goal": "Prepare a mixed CUDA and container benchmark host.",
         },
     )
@@ -257,7 +245,7 @@ def test_fake_control_plane_business_loop(client: TestClient) -> None:
 
     bootstrap_response = client.post(
         f"/api/v1/machines/{machine['id']}/bootstrap",
-        json={"profile": "full", "dry_run": True},
+        json={"profile": "full", "strategy": "scripted", "dry_run": True},
     )
     assert bootstrap_response.status_code == 200
     bootstrap = bootstrap_response.json()

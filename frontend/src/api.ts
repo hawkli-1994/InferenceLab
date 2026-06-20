@@ -80,14 +80,6 @@ export const api = {
       strategy: "pi_workflow",
       pi_workflow_goal: payload.goal
     }),
-  confirmManualEnvironment: (machineId: string, note?: string) =>
-    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, {
-      profile: "full",
-      dry_run: true,
-      strategy: "manual",
-      manual_environment: true,
-      manual_environment_note: note
-    }),
   createModel: (payload: ModelCreatePayload) => sendJson<ModelRecord>("/models", payload),
   distributeModel: (modelId: string, payload: ModelDistributePayload) =>
     sendJson<ModelDistributeResult>(`/models/${modelId}/distribute`, payload),

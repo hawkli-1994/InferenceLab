@@ -177,29 +177,6 @@ def _bootstrap_read(run: BootstrapRun) -> BootstrapRunRead:
     )
 
 
-def _manual_environment_step(note: str | None) -> StepResult:
-    clean_note = note.strip() if note and note.strip() else None
-    command = CommandRecord(command="manual_environment_configuration_acknowledged")
-    stdout = "Automatic bootstrap skipped; user will configure the target environment manually."
-    if clean_note:
-        stdout = f"{stdout} Note: {clean_note}"
-    result = CommandResult(command=command, exit_code=0, stdout=stdout)
-    return StepResult(
-        id="MANUAL_ENV",
-        name="Manual environment configuration",
-        status=StepStatus.skipped,
-        phase_results={"detect": result, "apply": result, "verify": result},
-        commands=[command],
-        exit_code=0,
-        changed_files=[],
-        snapshots={
-            "configuration_mode": "manual",
-            "automatic_bootstrap_executed": False,
-            "user_note": clean_note,
-        },
-    )
-
-
 def _default_environment_workflow_goal(machine: Machine) -> str:
     return (
         "Prepare this machine for reproducible InferenceLab model inference benchmarking. "
@@ -920,23 +897,6 @@ async def bootstrap_machine(
     if machine is None:
         raise _not_found("machine")
     strategy = payload.resolved_strategy()
-    if strategy == EnvironmentSetupStrategy.manual:
-        manual_step = _manual_environment_step(payload.manual_environment_note)
-        run = BootstrapRun(
-            machine_id=machine_id,
-            profile=payload.profile.value,
-            status="succeeded",
-            modules=[manual_step.id],
-            step_results=[manual_step.model_dump(mode="json")],
-            failure_class=None,
-            failure_hint=None,
-        )
-        machine.status = "ready"
-        session.add(run)
-        session.commit()
-        session.refresh(run)
-        return _bootstrap_read(run)
-
     if strategy == EnvironmentSetupStrategy.pi_workflow:
         pi_step = await _pi_environment_workflow_step(
             machine=machine,

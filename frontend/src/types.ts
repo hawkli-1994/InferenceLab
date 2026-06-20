@@ -40,11 +40,8 @@ export interface BootstrapRun {
 export interface BootstrapPayload {
   profile: string;
   dry_run: boolean;
-  strategy?: "pi_workflow" | "scripted" | "manual";
-  pi_workflow?: boolean;
+  strategy?: "pi_workflow" | "scripted";
   pi_workflow_goal?: string;
-  manual_environment?: boolean;
-  manual_environment_note?: string;
 }
 
 export interface MachineSnapshot {

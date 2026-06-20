@@ -284,10 +284,6 @@ select {
   background: #2f6f6b;
 }
 
-.manual-note {
-  max-width: 420px;
-}
-
 .workflow-goal {
   width: 100%;
   min-height: 96px;
@@ -491,10 +487,6 @@ pre {
 
 .flow-pi_workflow {
   grid-template-columns: repeat(5, minmax(130px, 1fr));
-}
-
-.flow-manual {
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
 }
 
 .flow-step {

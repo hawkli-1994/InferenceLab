@@ -91,9 +91,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
 远端 cwd/env、SFTP upload/download，以及 benchmark stdout/stderr 流式读取。默认测试和
 demo seed 仍不打开真实 SSH 连接。
 
-如果目标机环境已经由用户自行配置，可以在前端环境接管页面动态选择 `手动配置`。系统会
-跳过 Pi workflow 和 B1-B7 自动配置，记录 `MANUAL_ENV` bootstrap run，并把机器标记为
-`ready`，后续模型分发和 benchmark 可继续执行。
+旧的 `manual_environment` 旁路已移除。环境状态必须由 Pi workflow 的执行记录或显式
+scripted baseline 结果支撑，避免把未经验证的人工声明误标为 `ready`。
 
 使用数据库 demo 数据启动后端：
 
@@ -115,7 +114,7 @@ pnpm build
 ```
 
 当前前端只调用后端 API，不再导入本地 mock 数据。可直接操作数据库记录：新增机器、
-机器探测（dry-run 或真实 SSH）、Pi workflow/scripted/manual 环境接管、注册/分发模型、
+机器探测（dry-run 或真实 SSH）、Pi workflow/scripted 环境接管、注册/分发模型、
 预览调参候选、创建实验、提交 benchmark job（fake、remote inline、remote RQ）、
 轮询 job logs、查看 trial/log/metrics，并生成/导出报告 artifact 记录。空库可在页面点击
 `Seed DB`，或调用

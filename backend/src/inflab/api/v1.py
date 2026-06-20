@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,8 +20,9 @@ from inflab.benchmark import (
     run_remote_benchmark,
 )
 from inflab.benchmark_artifacts import persist_remote_benchmark_artifacts
-from inflab.config import get_settings
+from inflab.config import AgentExecutorSettings, LLMProviderSettings, get_settings
 from inflab.db.models import (
+    AgentRuntimeSettings,
     Artifact,
     BootstrapRun,
     Experiment,
@@ -44,6 +46,10 @@ from inflab.plugins import registry
 from inflab.probe import probe_remote_machine
 from inflab.reports import export_report, render_markdown_report
 from inflab.schemas import (
+    AgentSettingsRead,
+    AgentSettingsUpdate,
+    AgentSettingsValidationCheck,
+    AgentSettingsValidationRead,
     ArtifactCreate,
     ArtifactRead,
     ArtifactUploadText,
@@ -64,6 +70,7 @@ from inflab.schemas import (
     ImageCreate,
     ImageRead,
     JobRead,
+    LLMProviderName,
     MachineCreate,
     MachineRead,
     MachineSnapshotRead,
@@ -81,6 +88,7 @@ from inflab.schemas import (
     StepResult,
     StepStatus,
     TrialRead,
+    ValidationStatus,
 )
 from inflab.security import decrypt_secret, encrypt_secret, mask_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
@@ -196,6 +204,211 @@ def _model_read(model: ModelRecord) -> ModelRead:
         metadata=model.metadata_json,
         created_at=model.created_at,
     )
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _settings_record(session: Session) -> AgentRuntimeSettings | None:
+    return session.get(AgentRuntimeSettings, "default")
+
+
+def _effective_llm_provider_settings(session: Session) -> LLMProviderSettings:
+    app_settings = get_settings()
+    record = _settings_record(session)
+    if record is None:
+        return app_settings.llm_provider
+    api_key = app_settings.llm_provider.api_key
+    if record.encrypted_llm_api_key:
+        api_key = SecretStr(decrypt_secret(record.encrypted_llm_api_key, app_settings.secret_key))
+    return LLMProviderSettings(
+        provider=record.llm_provider,  # type: ignore[arg-type]
+        base_url=record.llm_base_url,
+        model=record.llm_model,
+        api_key=api_key,
+    )
+
+
+def _effective_agent_executor_settings(session: Session) -> AgentExecutorSettings:
+    app_settings = get_settings()
+    record = _settings_record(session)
+    if record is None:
+        return app_settings.agent_executor
+    return AgentExecutorSettings(
+        provider="pi" if record.pi_enabled else "disabled",
+        command=record.pi_command,
+        work_dir=record.pi_work_dir,
+        max_rounds=record.pi_max_rounds,
+        timeout_minutes=record.pi_timeout_minutes,
+    )
+
+
+def _has_llm_api_key(settings: LLMProviderSettings) -> bool:
+    return settings.api_key is not None and bool(settings.api_key.get_secret_value())
+
+
+def _agent_settings_read(session: Session) -> AgentSettingsRead:
+    llm_settings = _effective_llm_provider_settings(session)
+    pi_settings = _effective_agent_executor_settings(session)
+    pi_plan = pi_agent_executor_plan(pi_settings).as_dict()
+    worker_prompt = intelligent_worker_prompt(
+        task_spec_path="state/task_spec.md",
+        progress_path="state/progress.json",
+        directions_path="state/directions_tried.json",
+        completion_criteria=(
+            "produce at least one verifiable benchmark optimization finding or "
+            "document why the search should pivot"
+        ),
+    )
+    return AgentSettingsRead(
+        llm={
+            "provider": llm_settings.provider,
+            "base_url": llm_settings.base_url,
+            "model": llm_settings.model,
+            "api_key_configured": _has_llm_api_key(llm_settings),
+        },
+        pi={
+            "enabled": pi_settings.provider == "pi",
+            "command": pi_settings.command,
+            "work_dir": pi_settings.work_dir,
+            "max_rounds": pi_settings.max_rounds,
+            "timeout_minutes": pi_settings.timeout_minutes,
+        },
+        pi_executor_plan=pi_plan,
+        worker_prompt=worker_prompt,
+        standard_mode_note=(
+            "Standard mode does not depend on LLM or Pi agent settings; "
+            "only intelligent mode uses this configuration."
+        ),
+    )
+
+
+def _agent_settings_payload_has_key(
+    payload: AgentSettingsUpdate,
+    session: Session,
+) -> bool:
+    if payload.llm.api_key and payload.llm.api_key.strip():
+        return True
+    if payload.llm.clear_api_key:
+        return False
+    return _has_llm_api_key(_effective_llm_provider_settings(session))
+
+
+def _validate_agent_settings_payload(
+    payload: AgentSettingsUpdate,
+    session: Session,
+) -> AgentSettingsValidationRead:
+    checks: list[AgentSettingsValidationCheck] = []
+    llm_enabled = payload.llm.provider != LLMProviderName.disabled
+    if not llm_enabled:
+        checks.append(
+            AgentSettingsValidationCheck(
+                key="llm.provider",
+                status=ValidationStatus.passed,
+                message="LLM provider is disabled; standard mode remains fully available.",
+            )
+        )
+    else:
+        if _clean_optional_text(payload.llm.model):
+            checks.append(
+                AgentSettingsValidationCheck(
+                    key="llm.model",
+                    status=ValidationStatus.passed,
+                    message="LLM model is configured.",
+                )
+            )
+        else:
+            checks.append(
+                AgentSettingsValidationCheck(
+                    key="llm.model",
+                    status=ValidationStatus.failed,
+                    message="LLM model is required when the provider is enabled.",
+                )
+            )
+        if _agent_settings_payload_has_key(payload, session):
+            checks.append(
+                AgentSettingsValidationCheck(
+                    key="llm.api_key",
+                    status=ValidationStatus.passed,
+                    message="LLM API key is configured or preserved from the current settings.",
+                )
+            )
+        else:
+            checks.append(
+                AgentSettingsValidationCheck(
+                    key="llm.api_key",
+                    status=ValidationStatus.warning,
+                    message=(
+                        "No API key is configured; this only works for providers "
+                        "that do not require one."
+                    ),
+                )
+            )
+        if payload.llm.provider == LLMProviderName.openai_compatible and not _clean_optional_text(
+            payload.llm.base_url
+        ):
+            checks.append(
+                AgentSettingsValidationCheck(
+                    key="llm.base_url",
+                    status=ValidationStatus.warning,
+                    message=(
+                        "Base URL is usually required for OpenAI-compatible non-default endpoints."
+                    ),
+                )
+            )
+
+    if not payload.pi.enabled:
+        checks.append(
+            AgentSettingsValidationCheck(
+                key="pi.enabled",
+                status=ValidationStatus.passed,
+                message="Pi agent is disabled; intelligent mode will skip Pi worker execution.",
+            )
+        )
+    else:
+        checks.append(
+            AgentSettingsValidationCheck(
+                key="pi.command",
+                status=ValidationStatus.passed,
+                message="Pi command is configured.",
+            )
+        )
+        work_dir_status = ValidationStatus.passed
+        if not payload.pi.work_dir.startswith("/"):
+            work_dir_status = ValidationStatus.warning
+        checks.append(
+            AgentSettingsValidationCheck(
+                key="pi.work_dir",
+                status=work_dir_status,
+                message=(
+                    "Pi work directory is absolute."
+                    if work_dir_status == ValidationStatus.passed
+                    else (
+                        "Pi work directory is relative; prefer an absolute path "
+                        "for reproducibility."
+                    )
+                ),
+            )
+        )
+        checks.append(
+            AgentSettingsValidationCheck(
+                key="pi.limits",
+                status=ValidationStatus.passed,
+                message=(
+                    f"Pi worker cap is {payload.pi.max_rounds} rounds and "
+                    f"{payload.pi.timeout_minutes} minutes."
+                ),
+            )
+        )
+
+    overall = (
+        "invalid" if any(check.status == ValidationStatus.failed for check in checks) else "valid"
+    )
+    return AgentSettingsValidationRead(status=overall, checks=checks)
 
 
 def _image_read(image: ImageRecord) -> ImageRead:
@@ -315,12 +528,14 @@ def _experiment_plan(
     max_trials: int,
     gpu_count: int,
     mode: ExperimentMode = ExperimentMode.standard,
+    llm_provider_settings: LLMProviderSettings | None = None,
 ) -> ExperimentPlanRead:
     settings = get_settings()
+    llm_settings = llm_provider_settings or settings.llm_provider
     llm_candidates = []
-    if mode == ExperimentMode.intelligent and settings.llm_provider.provider != "disabled":
+    if mode == ExperimentMode.intelligent and llm_settings.provider != "disabled":
         llm_candidates = llm_candidates_or_empty(
-            settings.llm_provider,
+            llm_settings,
             {
                 "run_spec": run_spec.model_dump(mode="json"),
                 "gpu_count": gpu_count,
@@ -389,14 +604,17 @@ def openapi_ready() -> dict[str, str]:
 
 
 @router.get("/autoresearch/integration-plan", response_model=dict[str, Any])
-def get_autoresearch_integration_plan() -> dict[str, Any]:
-    settings = get_settings()
-    return autoresearch_integration_plan(pi_agent_executor_plan(settings.agent_executor))
+def get_autoresearch_integration_plan(
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return autoresearch_integration_plan(
+        pi_agent_executor_plan(_effective_agent_executor_settings(session))
+    )
 
 
 @router.get("/agent-executors/pi/plan", response_model=dict[str, Any])
-def get_pi_agent_executor_plan() -> dict[str, Any]:
-    return pi_agent_executor_plan(get_settings().agent_executor).as_dict()
+def get_pi_agent_executor_plan(session: Session = Depends(get_session)) -> dict[str, Any]:
+    return pi_agent_executor_plan(_effective_agent_executor_settings(session)).as_dict()
 
 
 @router.get("/agent-executors/pi/prompt", response_model=dict[str, str])
@@ -412,6 +630,48 @@ def get_pi_agent_worker_prompt() -> dict[str, str]:
             ),
         )
     }
+
+
+@router.get("/agent-settings", response_model=AgentSettingsRead)
+def get_agent_settings(session: Session = Depends(get_session)) -> AgentSettingsRead:
+    return _agent_settings_read(session)
+
+
+@router.put("/agent-settings", response_model=AgentSettingsRead)
+def update_agent_settings(
+    payload: AgentSettingsUpdate,
+    session: Session = Depends(get_session),
+) -> AgentSettingsRead:
+    record = _settings_record(session)
+    if record is None:
+        record = AgentRuntimeSettings(id="default")
+    record.llm_provider = payload.llm.provider.value
+    record.llm_base_url = _clean_optional_text(payload.llm.base_url)
+    record.llm_model = _clean_optional_text(payload.llm.model)
+    if payload.llm.clear_api_key:
+        record.encrypted_llm_api_key = None
+    elif payload.llm.api_key and payload.llm.api_key.strip():
+        record.encrypted_llm_api_key = encrypt_secret(
+            payload.llm.api_key.strip(),
+            get_settings().secret_key,
+        )
+    record.pi_enabled = payload.pi.enabled
+    record.pi_command = payload.pi.command.strip()
+    record.pi_work_dir = payload.pi.work_dir.strip()
+    record.pi_max_rounds = payload.pi.max_rounds
+    record.pi_timeout_minutes = payload.pi.timeout_minutes
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _agent_settings_read(session)
+
+
+@router.post("/agent-settings/validate", response_model=AgentSettingsValidationRead)
+def validate_agent_settings(
+    payload: AgentSettingsUpdate,
+    session: Session = Depends(get_session),
+) -> AgentSettingsValidationRead:
+    return _validate_agent_settings_payload(payload, session)
 
 
 @router.post("/dev/seed-demo-data", response_model=dict[str, int])
@@ -913,6 +1173,7 @@ def plan_experiment(
         max_trials=int(payload.budget.get("max_trials", 2)),
         gpu_count=_machine_gpu_count(machine),
         mode=payload.mode,
+        llm_provider_settings=_effective_llm_provider_settings(session),
     )
 
 
@@ -959,6 +1220,7 @@ def create_experiment(
         max_trials=int(payload.budget.get("max_trials", 2)),
         gpu_count=_machine_gpu_count(machine),
         mode=payload.mode,
+        llm_provider_settings=_effective_llm_provider_settings(session),
     )
     job_logs = [
         f"experiment {experiment.id} created",

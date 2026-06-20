@@ -1,4 +1,7 @@
 import type {
+  AgentSettings,
+  AgentSettingsUpdate,
+  AgentSettingsValidation,
   ArtifactRecord,
   BootstrapPayload,
   BenchmarkJobPayload,
@@ -35,9 +38,9 @@ async function getJson<T>(path: string): Promise<T> {
   return data as T;
 }
 
-async function sendJson<T>(path: string, body: unknown = {}): Promise<T> {
+async function sendJson<T>(path: string, body: unknown = {}, method = "POST"): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
@@ -58,6 +61,11 @@ export const api = {
     getJson<ReportRecord[]>(experimentId ? `/reports?experiment_id=${experimentId}` : "/reports"),
   seedDemoData: () => sendJson<Record<string, number>>("/dev/seed-demo-data"),
   createMachine: (payload: MachineCreatePayload) => sendJson<Machine>("/machines", payload),
+  agentSettings: () => getJson<AgentSettings>("/agent-settings"),
+  updateAgentSettings: (payload: AgentSettingsUpdate) =>
+    sendJson<AgentSettings>("/agent-settings", payload, "PUT"),
+  validateAgentSettings: (payload: AgentSettingsUpdate) =>
+    sendJson<AgentSettingsValidation>("/agent-settings/validate", payload),
   probeMachine: (machineId: string, dryRun = true) =>
     sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
   bootstrapMachine: (machineId: string, payload: BootstrapPayload) =>

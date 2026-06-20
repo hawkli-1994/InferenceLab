@@ -52,6 +52,8 @@ def test_openapi_schema_exposes_mvp_routes(client: TestClient) -> None:
         "/api/v1/models",
         "/api/v1/benchmarks/plan",
         "/api/v1/benchmarks/jobs",
+        "/api/v1/agent-settings",
+        "/api/v1/agent-settings/validate",
         "/api/v1/dev/seed-demo-data",
         "/api/v1/experiments/plan",
         "/api/v1/experiments",
@@ -61,6 +63,56 @@ def test_openapi_schema_exposes_mvp_routes(client: TestClient) -> None:
         "/api/v1/plugins",
     }
     assert expected_paths.issubset(paths)
+
+
+def test_agent_settings_update_validate_and_pi_plan(client: TestClient) -> None:
+    initial_response = client.get("/api/v1/agent-settings")
+    assert initial_response.status_code == 200
+    initial = initial_response.json()
+    assert initial["llm"]["provider"] == "disabled"
+    assert initial["llm"]["api_key_configured"] is False
+    assert initial["pi"]["enabled"] is True
+
+    payload = {
+        "llm": {
+            "provider": "openai_compatible",
+            "base_url": "https://llm-gateway.example.test/v1",
+            "model": "openai/gpt-4.1-mini",
+            "api_key": "do-not-return",
+            "clear_api_key": False,
+        },
+        "pi": {
+            "enabled": True,
+            "command": "pi --profile inflab",
+            "work_dir": "/data/workspace/custom-pi",
+            "max_rounds": 9,
+            "timeout_minutes": 45,
+        },
+    }
+
+    validate_response = client.post("/api/v1/agent-settings/validate", json=payload)
+    assert validate_response.status_code == 200
+    assert validate_response.json()["status"] == "valid"
+
+    update_response = client.put("/api/v1/agent-settings", json=payload)
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["llm"]["provider"] == "openai_compatible"
+    assert updated["llm"]["base_url"] == "https://llm-gateway.example.test/v1"
+    assert updated["llm"]["model"] == "openai/gpt-4.1-mini"
+    assert updated["llm"]["api_key_configured"] is True
+    assert "do-not-return" not in update_response.text
+    assert updated["pi"]["command"] == "pi --profile inflab"
+    assert updated["pi_executor_plan"]["command"] == "pi --profile inflab"
+    assert "Standard mode does not depend" in updated["standard_mode_note"]
+
+    plan_response = client.get("/api/v1/agent-executors/pi/plan")
+    assert plan_response.status_code == 200
+    assert plan_response.json()["command"] == "pi --profile inflab"
+
+    prompt_response = client.get("/api/v1/agent-executors/pi/prompt")
+    assert prompt_response.status_code == 200
+    assert "Deli_AutoResearch worker iteration" in prompt_response.json()["prompt"]
 
 
 def test_demo_seed_populates_database_backed_workbench_data(client: TestClient) -> None:

@@ -3,6 +3,8 @@ export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancele
 export type ExecutionMode = "fake" | "remote_inline" | "remote_rq";
 export type BenchmarkKind = "serve" | "throughput";
 export type ExperimentMode = "standard" | "intelligent";
+export type LLMProviderName = "disabled" | "openai_compatible" | "anthropic";
+export type ValidationStatus = "passed" | "warning" | "failed";
 
 export interface Machine {
   id: string;
@@ -83,6 +85,60 @@ export interface ModelDistributeResult {
   source: string;
   target_path: string;
   result: Record<string, unknown>;
+}
+
+export interface AgentSettingsLLM {
+  provider: LLMProviderName;
+  base_url: string | null;
+  model: string | null;
+  api_key_configured: boolean;
+}
+
+export interface AgentSettingsPi {
+  enabled: boolean;
+  command: string;
+  work_dir: string;
+  max_rounds: number;
+  timeout_minutes: number;
+}
+
+export interface PiExecutorPlan {
+  provider: string;
+  command: string;
+  role: string;
+  work_dir: string;
+  max_rounds: number;
+  timeout_minutes: number;
+  status: string;
+  notes: string[];
+}
+
+export interface AgentSettings {
+  llm: AgentSettingsLLM;
+  pi: AgentSettingsPi;
+  pi_executor_plan: PiExecutorPlan;
+  worker_prompt: string;
+  standard_mode_note: string;
+}
+
+export interface AgentSettingsUpdate {
+  llm: {
+    provider: LLMProviderName;
+    base_url?: string | null;
+    model?: string | null;
+    api_key?: string | null;
+    clear_api_key?: boolean;
+  };
+  pi: AgentSettingsPi;
+}
+
+export interface AgentSettingsValidation {
+  status: "valid" | "invalid";
+  checks: Array<{
+    key: string;
+    status: ValidationStatus;
+    message: string;
+  }>;
 }
 
 export interface MachineCreatePayload {

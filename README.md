@@ -155,9 +155,11 @@ make pm2-start-all
 - `POST /api/v1/benchmarks/jobs` with `execution_mode=remote_rq`：通过 Redis/RQ worker
   调度运行。
 
-外部 LLM candidate provider 使用 LiteLLM。默认 `INFLAB_LLM_PROVIDER=disabled`；启用
-OpenAI-compatible 或 Anthropic provider 后，候选参数仍会先经过 Pydantic schema 校验和
-启发式剪枝。
+外部 LLM candidate provider 使用 LiteLLM。默认 `INFLAB_LLM_PROVIDER=disabled`；也可在
+实验创建页右侧的 `Agent Settings` 面板动态配置 OpenAI-compatible / Anthropic provider、
+Base URL、Model、API Key，以及 Pi agent command/work dir/round/timeout。UI 保存的配置会
+持久化到数据库并覆盖环境变量默认值；API Key 加密保存且不回显。标准模式不依赖这些配置，
+只有智能模式会使用。候选参数仍会先经过 Pydantic schema 校验和启发式剪枝。
 
 ## E2E Status
 

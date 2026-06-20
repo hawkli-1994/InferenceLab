@@ -12,8 +12,10 @@ import {
   Play,
   Plus,
   RotateCw,
+  Save,
   Search,
   Server,
+  ShieldCheck,
   TerminalSquare,
   UserCheck
 } from "lucide-react";
@@ -24,6 +26,8 @@ import type { ElementType, ReactNode } from "react";
 import { api } from "./api";
 import { initialLocale, translate, type Locale, type MessageKey } from "./i18n";
 import type {
+  AgentSettings,
+  AgentSettingsUpdate,
   BenchmarkKind,
   BootstrapRun,
   ExecutionMode,
@@ -33,6 +37,7 @@ import type {
   ExperimentPlan,
   ExperimentRunLog,
   JobRecord,
+  LLMProviderName,
   Machine,
   MetricsSummary,
   ModelDistributeResult,
@@ -95,6 +100,21 @@ function runSpecFromExperiment(experiment: Experiment) {
     framework_params: experiment.framework_params,
     prompt_dataset: experiment.prompt_dataset,
     benchmark_version: "inflab-bench-real-v1"
+  };
+}
+
+function agentSettingsToDraft(settings: AgentSettings): AgentSettingsUpdate {
+  return {
+    llm: {
+      provider: settings.llm.provider,
+      base_url: settings.llm.base_url ?? "",
+      model: settings.llm.model ?? "",
+      api_key: "",
+      clear_api_key: false
+    },
+    pi: {
+      ...settings.pi
+    }
   };
 }
 
@@ -435,6 +455,251 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   );
 }
 
+function AgentSettingsPanel() {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const settings = useQuery({ queryKey: ["agent-settings"], queryFn: api.agentSettings });
+  const [draft, setDraft] = useState<AgentSettingsUpdate | null>(null);
+
+  useEffect(() => {
+    if (settings.data) {
+      setDraft(agentSettingsToDraft(settings.data));
+    }
+  }, [settings.data]);
+
+  const saveSettings = useMutation({
+    mutationFn: (payload: AgentSettingsUpdate) => api.updateAgentSettings(payload),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["agent-settings"], data);
+      setDraft(agentSettingsToDraft(data));
+    }
+  });
+  const validateSettings = useMutation({
+    mutationFn: (payload: AgentSettingsUpdate) => api.validateAgentSettings(payload)
+  });
+
+  const updateLlm = (patch: Partial<AgentSettingsUpdate["llm"]>) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            llm: { ...current.llm, ...patch }
+          }
+        : current
+    );
+  };
+  const updatePi = (patch: Partial<AgentSettingsUpdate["pi"]>) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            pi: { ...current.pi, ...patch }
+          }
+        : current
+    );
+  };
+
+  if (settings.isLoading || !draft) {
+    return (
+      <aside className="panel agent-settings-panel">
+        <h2>{t("agentSettings")}</h2>
+        <p>{t("running")}</p>
+      </aside>
+    );
+  }
+
+  const piPlan = settings.data?.pi_executor_plan;
+  const workerPrompt = settings.data?.worker_prompt ?? "";
+  const apiKeyStatus = settings.data?.llm.api_key_configured
+    ? t("apiKeyConfigured")
+    : t("apiKeyNotConfigured");
+
+  return (
+    <aside className="panel agent-settings-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>{t("agentSettings")}</h2>
+          <p>{t("agentSettingsDesc")}</p>
+        </div>
+        {settings.data ? <StatusPill status={settings.data.pi_executor_plan.status} /> : null}
+      </div>
+
+      <div className="settings-section">
+        <h3>{t("llmProvider")}</h3>
+        <label>
+          {t("llmProvider")}
+          <select
+            value={draft.llm.provider}
+            onChange={(event) =>
+              updateLlm({ provider: event.target.value as LLMProviderName })
+            }
+          >
+            <option value="disabled">{t("disabledProvider")}</option>
+            <option value="openai_compatible">{t("openaiCompatible")}</option>
+            <option value="anthropic">{t("anthropic")}</option>
+          </select>
+        </label>
+        <label>
+          {t("baseUrl")}
+          <input
+            value={draft.llm.base_url ?? ""}
+            disabled={draft.llm.provider === "disabled"}
+            placeholder="https://api.example.com/v1"
+            onChange={(event) => updateLlm({ base_url: event.target.value })}
+          />
+        </label>
+        <label>
+          {t("model")}
+          <input
+            value={draft.llm.model ?? ""}
+            disabled={draft.llm.provider === "disabled"}
+            placeholder="openai/gpt-4.1-mini"
+            onChange={(event) => updateLlm({ model: event.target.value })}
+          />
+        </label>
+        <label>
+          {t("apiKey")}
+          <input
+            type="password"
+            value={draft.llm.api_key ?? ""}
+            disabled={draft.llm.provider === "disabled"}
+            placeholder={apiKeyStatus}
+            onChange={(event) =>
+              updateLlm({ api_key: event.target.value, clear_api_key: false })
+            }
+          />
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={Boolean(draft.llm.clear_api_key)}
+            disabled={!settings.data?.llm.api_key_configured}
+            onChange={(event) =>
+              updateLlm({ clear_api_key: event.target.checked, api_key: "" })
+            }
+          />
+          {t("clearApiKey")}
+        </label>
+      </div>
+
+      <div className="settings-section">
+        <h3>{t("piAgent")}</h3>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={draft.pi.enabled}
+            onChange={(event) => updatePi({ enabled: event.target.checked })}
+          />
+          {t("enabled")}
+        </label>
+        <label>
+          {t("command")}
+          <input
+            value={draft.pi.command}
+            disabled={!draft.pi.enabled}
+            onChange={(event) => updatePi({ command: event.target.value })}
+          />
+        </label>
+        <label>
+          {t("workDir")}
+          <input
+            value={draft.pi.work_dir}
+            disabled={!draft.pi.enabled}
+            onChange={(event) => updatePi({ work_dir: event.target.value })}
+          />
+        </label>
+        <div className="settings-grid">
+          <label>
+            {t("maxRounds")}
+            <input
+              type="number"
+              min="1"
+              max="200"
+              value={draft.pi.max_rounds}
+              disabled={!draft.pi.enabled}
+              onChange={(event) => updatePi({ max_rounds: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            {t("timeoutMinutes")}
+            <input
+              type="number"
+              min="1"
+              max="1440"
+              value={draft.pi.timeout_minutes}
+              disabled={!draft.pi.enabled}
+              onChange={(event) => updatePi({ timeout_minutes: Number(event.target.value) })}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="form-actions">
+        <button
+          className="primary"
+          type="button"
+          disabled={saveSettings.isPending}
+          onClick={() => saveSettings.mutate(draft)}
+        >
+          <Save size={16} /> {saveSettings.isPending ? t("saving") : t("saveSettings")}
+        </button>
+        <button
+          className="secondary"
+          type="button"
+          disabled={validateSettings.isPending}
+          onClick={() => validateSettings.mutate(draft)}
+        >
+          <ShieldCheck size={16} />{" "}
+          {validateSettings.isPending ? t("validating") : t("validateConfig")}
+        </button>
+      </div>
+
+      {validateSettings.data ? (
+        <div className="validation-list">
+          <h3>{t("validation")}</h3>
+          {validateSettings.data.checks.map((check) => (
+            <div className={`validation-item validation-${check.status}`} key={check.key}>
+              <strong>{check.key}</strong>
+              <span>{check.message}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="settings-section">
+        <h3>{t("currentPiPlan")}</h3>
+        <dl className="plan-list">
+          <div>
+            <dt>provider</dt>
+            <dd>{piPlan?.provider ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>{t("command")}</dt>
+            <dd>{piPlan?.command ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>{t("workDir")}</dt>
+            <dd>{piPlan?.work_dir ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>{t("maxRounds")}</dt>
+            <dd>{piPlan?.max_rounds ?? "n/a"}</dd>
+          </div>
+          <div>
+            <dt>{t("timeoutMinutes")}</dt>
+            <dd>{piPlan?.timeout_minutes ?? "n/a"}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="settings-section">
+        <h3>{t("workerPromptPreview")}</h3>
+        <pre className="prompt-preview">{workerPrompt}</pre>
+      </div>
+    </aside>
+  );
+}
+
 function ExperimentsView({
   machines,
   models,
@@ -515,149 +780,152 @@ function ExperimentsView({
           <p>{t("createExperimentDesc")}</p>
         </div>
       </header>
-      <div className="split">
-        <form
-          className="panel form-grid"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createModel.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <label>
-            {t("model")}
-            <input name="model_name" defaultValue="Qwen3-32B" />
-          </label>
-          <label>
-            {t("cachePath")}
-            <input name="cache_path" defaultValue="/data/models/qwen3-32b" />
-          </label>
-          <label>
-            {t("source")}
-            <select name="source" defaultValue="mock">
-              <option value="mock">existing path</option>
-              <option value="rsync">rsync mirror</option>
-              <option value="nfs">NFS mount</option>
-              <option value="minio">MinIO/S3</option>
-              <option value="huggingface">Hugging Face</option>
-              <option value="modelscope">ModelScope</option>
-            </select>
-          </label>
-          <button className="primary form-action" disabled={createModel.isPending}>
-            <Database size={16} /> {createModel.isPending ? t("registering") : t("registerModel")}
-          </button>
-          <span className="form-note">{models.length} {t("modelsRegistered")}</span>
-        </form>
-        <form
-          className="panel form-grid"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createExperiment.mutate(buildPayload(new FormData(event.currentTarget)));
-          }}
-        >
-          <label>
-            {t("name")}
-            <input name="name" defaultValue="container baseline" />
-          </label>
-          <label>
-            {t("machines")}
-            <select name="machine_id" value={machineId} onChange={(event) => setSelectedMachineId(event.target.value)}>
-              {machines.length === 0 ? (
-                <option value="">No machines</option>
-              ) : (
-                machines.map((machine) => (
-                  <option value={machine.id} key={machine.id}>
-                    {machine.name}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          <label>
-            {t("model")}
-            <select name="model_id" value={modelId} onChange={(event) => setSelectedModelId(event.target.value)}>
-              {models.length === 0 ? (
-                <option value="">No models</option>
-              ) : (
-                models.map((model) => (
-                  <option value={model.id} key={model.id}>
-                    {model.name}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          <label>
-            {t("framework")}
-            <select name="framework" defaultValue="vllm">
-              <option value="vllm">vLLM</option>
-              <option value="sglang">SGLang</option>
-            </select>
-          </label>
-          <label>
-            {t("runtime")}
-            <select name="runtime_mode" defaultValue="container">
-              <option value="container">container</option>
-              <option value="bare_metal">bare metal</option>
-            </select>
-          </label>
-          <label>
-            {t("goal")}
-            <select name="goal" defaultValue="max_throughput">
-              <option value="max_throughput">maximum throughput</option>
-              <option value="lowest_p99">lowest P99 latency</option>
-            </select>
-          </label>
-          <label>
-            {t("mode")}
-            <select name="mode" defaultValue="standard">
-              <option value="standard">{t("standardMode")}</option>
-              <option value="intelligent">{t("intelligentMode")}</option>
-            </select>
-            <small>{t("standardModeHint")}</small>
-          </label>
-          <label>
-            {t("frameworkVersion")}
-            <input name="framework_version" defaultValue="0.10.0" />
-          </label>
-          <label>
-            {t("promptDataset")}
-            <input name="prompt_dataset" defaultValue="random" />
-          </label>
-          <label>
-            {t("tensorParallel")}
-            <input name="tensor_parallel_size" type="number" min="1" defaultValue="4" />
-          </label>
-          <label>
-            {t("gpuMemory")}
-            <input name="gpu_memory_utilization" type="number" min="0.1" max="1" step="0.01" defaultValue="0.88" />
-          </label>
-          <label>
-            {t("maxSeqs")}
-            <input name="max_num_seqs" type="number" min="1" defaultValue="128" />
-          </label>
-          <label>
-            {t("maxTrials")}
-            <input name="max_trials" type="number" min="1" max="8" defaultValue="2" />
-          </label>
-          <div className="form-actions">
-            <button
-              className="secondary"
-              type="button"
-              disabled={!machineId || !modelId || planExperiment.isPending}
-              onClick={(event) => {
-                const form = event.currentTarget.form;
-                if (form) {
-                  planExperiment.mutate(buildPayload(new FormData(form)));
-                }
-              }}
-            >
-              <RotateCw size={16} /> {planExperiment.isPending ? t("planning") : t("preview")}
+      <div className="experiment-layout">
+        <div className="experiment-main">
+          <form
+            className="panel form-grid"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createModel.mutate(new FormData(event.currentTarget));
+            }}
+          >
+            <label>
+              {t("model")}
+              <input name="model_name" defaultValue="Qwen3-32B" />
+            </label>
+            <label>
+              {t("cachePath")}
+              <input name="cache_path" defaultValue="/data/models/qwen3-32b" />
+            </label>
+            <label>
+              {t("source")}
+              <select name="source" defaultValue="mock">
+                <option value="mock">existing path</option>
+                <option value="rsync">rsync mirror</option>
+                <option value="nfs">NFS mount</option>
+                <option value="minio">MinIO/S3</option>
+                <option value="huggingface">Hugging Face</option>
+                <option value="modelscope">ModelScope</option>
+              </select>
+            </label>
+            <button className="primary form-action" disabled={createModel.isPending}>
+              <Database size={16} /> {createModel.isPending ? t("registering") : t("registerModel")}
             </button>
-            <button className="primary" disabled={!machineId || !modelId || createExperiment.isPending}>
-              <TerminalSquare size={16} /> {createExperiment.isPending ? t("creating") : t("create")}
-            </button>
-          </div>
-        </form>
+            <span className="form-note">{models.length} {t("modelsRegistered")}</span>
+          </form>
+          <form
+            className="panel form-grid"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createExperiment.mutate(buildPayload(new FormData(event.currentTarget)));
+            }}
+          >
+            <label>
+              {t("name")}
+              <input name="name" defaultValue="container baseline" />
+            </label>
+            <label>
+              {t("machines")}
+              <select name="machine_id" value={machineId} onChange={(event) => setSelectedMachineId(event.target.value)}>
+                {machines.length === 0 ? (
+                  <option value="">No machines</option>
+                ) : (
+                  machines.map((machine) => (
+                    <option value={machine.id} key={machine.id}>
+                      {machine.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <label>
+              {t("model")}
+              <select name="model_id" value={modelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+                {models.length === 0 ? (
+                  <option value="">No models</option>
+                ) : (
+                  models.map((model) => (
+                    <option value={model.id} key={model.id}>
+                      {model.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <label>
+              {t("framework")}
+              <select name="framework" defaultValue="vllm">
+                <option value="vllm">vLLM</option>
+                <option value="sglang">SGLang</option>
+              </select>
+            </label>
+            <label>
+              {t("runtime")}
+              <select name="runtime_mode" defaultValue="container">
+                <option value="container">container</option>
+                <option value="bare_metal">bare metal</option>
+              </select>
+            </label>
+            <label>
+              {t("goal")}
+              <select name="goal" defaultValue="max_throughput">
+                <option value="max_throughput">maximum throughput</option>
+                <option value="lowest_p99">lowest P99 latency</option>
+              </select>
+            </label>
+            <label>
+              {t("mode")}
+              <select name="mode" defaultValue="standard">
+                <option value="standard">{t("standardMode")}</option>
+                <option value="intelligent">{t("intelligentMode")}</option>
+              </select>
+              <small>{t("standardModeHint")}</small>
+            </label>
+            <label>
+              {t("frameworkVersion")}
+              <input name="framework_version" defaultValue="0.10.0" />
+            </label>
+            <label>
+              {t("promptDataset")}
+              <input name="prompt_dataset" defaultValue="random" />
+            </label>
+            <label>
+              {t("tensorParallel")}
+              <input name="tensor_parallel_size" type="number" min="1" defaultValue="4" />
+            </label>
+            <label>
+              {t("gpuMemory")}
+              <input name="gpu_memory_utilization" type="number" min="0.1" max="1" step="0.01" defaultValue="0.88" />
+            </label>
+            <label>
+              {t("maxSeqs")}
+              <input name="max_num_seqs" type="number" min="1" defaultValue="128" />
+            </label>
+            <label>
+              {t("maxTrials")}
+              <input name="max_trials" type="number" min="1" max="8" defaultValue="2" />
+            </label>
+            <div className="form-actions">
+              <button
+                className="secondary"
+                type="button"
+                disabled={!machineId || !modelId || planExperiment.isPending}
+                onClick={(event) => {
+                  const form = event.currentTarget.form;
+                  if (form) {
+                    planExperiment.mutate(buildPayload(new FormData(form)));
+                  }
+                }}
+              >
+                <RotateCw size={16} /> {planExperiment.isPending ? t("planning") : t("preview")}
+              </button>
+              <button className="primary" disabled={!machineId || !modelId || createExperiment.isPending}>
+                <TerminalSquare size={16} /> {createExperiment.isPending ? t("creating") : t("create")}
+              </button>
+            </div>
+          </form>
+        </div>
+        <AgentSettingsPanel />
       </div>
       <form
         className="panel form-grid"

@@ -48,6 +48,18 @@ class StepStatus(StrEnum):
     failed = "failed"
 
 
+class LLMProviderName(StrEnum):
+    disabled = "disabled"
+    openai_compatible = "openai_compatible"
+    anthropic = "anthropic"
+
+
+class ValidationStatus(StrEnum):
+    passed = "passed"
+    warning = "warning"
+    failed = "failed"
+
+
 class Page(BaseModel):
     items: list[Any]
     total: int
@@ -233,6 +245,65 @@ class ArtifactUploadText(BaseModel):
     content: str
     content_type: str = "text/plain"
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentSettingsLLMRead(BaseModel):
+    provider: LLMProviderName
+    base_url: str | None
+    model: str | None
+    api_key_configured: bool
+
+
+class AgentSettingsPiRead(BaseModel):
+    enabled: bool
+    command: str
+    work_dir: str
+    max_rounds: int
+    timeout_minutes: int
+
+
+class AgentSettingsRead(BaseModel):
+    llm: AgentSettingsLLMRead
+    pi: AgentSettingsPiRead
+    pi_executor_plan: dict[str, Any]
+    worker_prompt: str
+    standard_mode_note: str
+
+
+class AgentSettingsLLMUpdate(BaseModel):
+    provider: LLMProviderName = LLMProviderName.disabled
+    base_url: str | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=255)
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_api_key: bool = False
+
+
+class AgentSettingsPiUpdate(BaseModel):
+    enabled: bool = True
+    command: str = Field(default="pi", min_length=1, max_length=500)
+    work_dir: str = Field(
+        default="/data/workspace/inflab-autoresearch",
+        min_length=1,
+        max_length=500,
+    )
+    max_rounds: int = Field(default=15, ge=1, le=200)
+    timeout_minutes: int = Field(default=30, ge=1, le=1440)
+
+
+class AgentSettingsUpdate(BaseModel):
+    llm: AgentSettingsLLMUpdate = Field(default_factory=AgentSettingsLLMUpdate)
+    pi: AgentSettingsPiUpdate = Field(default_factory=AgentSettingsPiUpdate)
+
+
+class AgentSettingsValidationCheck(BaseModel):
+    key: str
+    status: ValidationStatus
+    message: str
+
+
+class AgentSettingsValidationRead(BaseModel):
+    status: Literal["valid", "invalid"]
+    checks: list[AgentSettingsValidationCheck]
 
 
 class FrameworkParams(BaseModel):

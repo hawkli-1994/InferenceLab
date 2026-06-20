@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -111,6 +111,21 @@ class Artifact(Base, TimestampMixin):
     sha256: Mapped[str | None] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class AgentRuntimeSettings(Base, TimestampMixin):
+    __tablename__ = "agent_runtime_settings"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default="default")
+    llm_provider: Mapped[str] = mapped_column(String(40), default="disabled")
+    llm_base_url: Mapped[str | None] = mapped_column(Text)
+    llm_model: Mapped[str | None] = mapped_column(String(255))
+    encrypted_llm_api_key: Mapped[str | None] = mapped_column(Text)
+    pi_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    pi_command: Mapped[str] = mapped_column(Text, default="pi")
+    pi_work_dir: Mapped[str] = mapped_column(Text, default="/data/workspace/inflab-autoresearch")
+    pi_max_rounds: Mapped[int] = mapped_column(Integer, default=15)
+    pi_timeout_minutes: Mapped[int] = mapped_column(Integer, default=30)
 
 
 class Experiment(Base, TimestampMixin):

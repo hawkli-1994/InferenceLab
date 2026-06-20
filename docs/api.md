@@ -13,7 +13,8 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 - Experiments: standard/intelligent mode candidate planning, create/query/cancel/copy/compare, trials, run-log aggregation, metrics, chart data.
 - Plugins: runtime/framework/driver/model plugin registry.
 - AutoResearch: `GET /api/v1/autoresearch/integration-plan` exposes the Deli_AutoResearch intelligent-mode protocol boundary.
-- Agent executors: `GET /api/v1/agent-executors/pi/plan` and `/prompt` expose the Pi worker executor plan for intelligent mode.
+- Agent settings: `GET/PUT /api/v1/agent-settings` persists LLM provider and Pi executor configuration; `/validate` checks a draft config without saving secrets.
+- Agent executors: `GET /api/v1/agent-executors/pi/plan` and `/prompt` expose the effective Pi worker executor plan for intelligent mode.
 - Reports: list/query, Markdown rendering, PDF/DOCX export through Pandoc/Typst when installed, artifact metadata, redaction.
 - Dev data: `POST /api/v1/dev/seed-demo-data` creates idempotent database-backed demo records.
 
@@ -97,15 +98,27 @@ Experiment planning accepts `mode`:
 stall-detection, gate commands, and Pi worker executor metadata for the intelligent mode. The
 protocol is metadata-only in this slice; standard mode does not depend on it.
 
+The workbench exposes an Agent Settings panel beside experiment creation. It can configure:
+
+- LLM provider: disabled, OpenAI-compatible, or Anthropic;
+- Base URL, model, and encrypted API key;
+- Pi agent enabled state, command, work dir, max rounds, and timeout;
+- config validation plus the current Pi executor plan and worker prompt preview.
+
 Pi agent is modeled as a worker executor:
 
 - `GET /api/v1/agent-executors/pi/plan`: provider, command, work dir, round cap, timeout, and boundary notes.
 - `GET /api/v1/agent-executors/pi/prompt`: bounded one-iteration worker prompt aligned with Deli_AutoResearch.
+- `GET /api/v1/agent-settings`: effective settings, masked API key status, Pi plan, and prompt.
+- `PUT /api/v1/agent-settings`: persists UI settings; blank API key preserves the existing key,
+  and `clear_api_key=true` removes it.
+- `POST /api/v1/agent-settings/validate`: validates a draft settings payload without saving it.
 
 ## LLM Candidate Provider
 
 Experiment planning can merge deterministic candidates with LiteLLM-generated candidates in
-`mode=intelligent`. The provider is disabled by default. Configure:
+`mode=intelligent`. The provider is disabled by default. Configure through Agent Settings in the
+workbench, or use environment variables as process defaults:
 
 - `INFLAB_LLM_PROVIDER=openai_compatible` or `anthropic`;
 - `INFLAB_LLM_MODEL`;
@@ -123,6 +136,7 @@ The workbench now has a database-backed interactive launch path:
 - register a demo model from the frontend;
 - create/probe a machine and run dry-run or real SSH bootstrap;
 - distribute a model to the selected machine;
+- configure Agent Settings for intelligent mode without affecting standard mode;
 - preview Agent tuning candidates through `POST /api/v1/experiments/plan`;
 - create an experiment with validated candidate params and generated trial logs;
 - submit fake, remote inline, or remote RQ benchmark jobs and poll job logs;

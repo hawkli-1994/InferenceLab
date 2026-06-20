@@ -75,6 +75,9 @@
 GET /api/v1/autoresearch/integration-plan
 GET /api/v1/agent-executors/pi/plan
 GET /api/v1/agent-executors/pi/prompt
+GET /api/v1/agent-settings
+PUT /api/v1/agent-settings
+POST /api/v1/agent-settings/validate
 ```
 
 ## 3. Deli_AutoResearch 选型
@@ -103,7 +106,8 @@ GET /api/v1/agent-executors/pi/prompt
 1. 标准模式不依赖 Deli_AutoResearch。
 2. 智能模式先通过后端 `GET /api/v1/autoresearch/integration-plan` 暴露协议、gates 和边界。
 3. Pi agent 通过 `GET /api/v1/agent-executors/pi/plan` 暴露可配置执行器计划，通过 `GET /api/v1/agent-executors/pi/prompt` 生成单轮 worker prompt。
-4. 后续智能模式落地时，在实验目录生成：
+4. Agent Settings 面板持久化 LLM provider、Base URL、Model、加密 API Key，以及 Pi agent command/work dir/round/timeout；标准模式不读取这些配置。
+5. 后续智能模式落地时，在实验目录生成：
    - `state/task_spec.md`
    - `state/progress.json`
    - `state/findings.jsonl`
@@ -112,9 +116,9 @@ GET /api/v1/agent-executors/pi/prompt
    - `logs/work.jsonl`
    - `logs/orchestrator.jsonl`
    - `logs/heartbeat.jsonl`
-5. 每次 Pi worker session 上限：15 rounds 或 30 minutes。
-6. 智能模式每轮必须运行 gates：`uv run pytest`、`uv run ruff check .`、`pnpm build`，后续再增加 benchmark score gate。
-7. Deli_AutoResearch 只能约束智能模式的编排和搜索；Pi agent 只能执行有界 worker iteration；两者都不得修改实验记录、报告真实性和标准模式行为。
+6. 每次 Pi worker session 上限来自 Agent Settings，默认 15 rounds 或 30 minutes。
+7. 智能模式每轮必须运行 gates：`uv run pytest`、`uv run ruff check .`、`pnpm build`，后续再增加 benchmark score gate。
+8. Deli_AutoResearch 只能约束智能模式的编排和搜索；Pi agent 只能执行有界 worker iteration；两者都不得修改实验记录、报告真实性和标准模式行为。
 
 ## 4. 国际化策略
 
@@ -148,6 +152,7 @@ GET /api/v1/agent-executors/pi/prompt
 - 候选预览在标准模式下返回 `StandardMatrix` phase。
 - 智能模式不会在未配置 LLM/AutoResearch orchestration 时破坏标准流程。
 - Pi agent executor plan 明确显示其 worker 角色、命令、工作目录和 round/time cap。
+- Agent Settings UI 可配置 LLM provider 和 Pi agent，并明确提示只有智能模式使用。
 - UI 可在中文/英文之间切换。
 - 单元测试覆盖标准模式矩阵、智能模式规划和 AutoResearch integration plan。
 - E2E 仍按当前项目策略绕过，不提交 `tests/e2e/backend_e2e_enabled`。

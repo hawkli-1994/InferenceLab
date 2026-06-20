@@ -85,6 +85,16 @@ curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
 远端 cwd/env、SFTP upload/download，以及 benchmark stdout/stderr 流式读取。默认测试和
 demo seed 仍不打开真实 SSH 连接。
 
+如果目标机环境已经由用户自行配置，可以在 bootstrap 请求中传
+`manual_environment=true` 跳过 B1-B7 自动配置。系统会记录 `MANUAL_ENV` bootstrap run，
+并把机器标记为 `ready`，后续模型分发和 benchmark 可继续执行：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/machines/{machine_id}/bootstrap \
+  -H 'content-type: application/json' \
+  -d '{"profile":"full","manual_environment":true,"manual_environment_note":"configured manually"}'
+```
+
 使用数据库 demo 数据启动后端：
 
 ```bash

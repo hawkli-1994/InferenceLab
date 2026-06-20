@@ -52,6 +52,8 @@ from inflab.schemas import (
     BenchmarkPlanCreate,
     BootstrapRequest,
     BootstrapRunRead,
+    CommandRecord,
+    CommandResult,
     ExperimentCreate,
     ExperimentMode,
     ExperimentPlanRead,
@@ -76,6 +78,8 @@ from inflab.schemas import (
     ReportCreate,
     ReportRead,
     RuntimeMode,
+    StepResult,
+    StepStatus,
     TrialRead,
 )
 from inflab.security import decrypt_secret, encrypt_secret, mask_secret
@@ -155,6 +159,29 @@ def _bootstrap_read(run: BootstrapRun) -> BootstrapRunRead:
         failure_hint=run.failure_hint,
         created_at=run.created_at,
         updated_at=run.updated_at,
+    )
+
+
+def _manual_environment_step(note: str | None) -> StepResult:
+    clean_note = note.strip() if note and note.strip() else None
+    command = CommandRecord(command="manual_environment_configuration_acknowledged")
+    stdout = "Automatic bootstrap skipped; user will configure the target environment manually."
+    if clean_note:
+        stdout = f"{stdout} Note: {clean_note}"
+    result = CommandResult(command=command, exit_code=0, stdout=stdout)
+    return StepResult(
+        id="MANUAL_ENV",
+        name="Manual environment configuration",
+        status=StepStatus.skipped,
+        phase_results={"detect": result, "apply": result, "verify": result},
+        commands=[command],
+        exit_code=0,
+        changed_files=[],
+        snapshots={
+            "configuration_mode": "manual",
+            "automatic_bootstrap_executed": False,
+            "user_note": clean_note,
+        },
     )
 
 
@@ -523,6 +550,23 @@ async def bootstrap_machine(
     machine = session.get(Machine, machine_id)
     if machine is None:
         raise _not_found("machine")
+    if payload.manual_environment:
+        manual_step = _manual_environment_step(payload.manual_environment_note)
+        run = BootstrapRun(
+            machine_id=machine_id,
+            profile=payload.profile.value,
+            status="succeeded",
+            modules=[manual_step.id],
+            step_results=[manual_step.model_dump(mode="json")],
+            failure_class=None,
+            failure_hint=None,
+        )
+        machine.status = "ready"
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return _bootstrap_read(run)
+
     steps = resolve_bootstrap_steps(payload.profile.value, payload.modules)
     ctx = ExecutionContext(machine_id=machine_id, dry_run=payload.dry_run)
     executor = FakeExecutor() if payload.dry_run else _ssh_executor_for_machine(machine)

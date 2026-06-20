@@ -138,6 +138,8 @@ class BootstrapRequest(BaseModel):
     profile: BootstrapProfile = BootstrapProfile.full
     modules: list[str] | None = None
     dry_run: bool = True
+    manual_environment: bool = False
+    manual_environment_note: str | None = Field(default=None, max_length=500)
 
 
 class BootstrapRunRead(BaseModel):

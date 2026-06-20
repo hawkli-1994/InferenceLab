@@ -1,5 +1,6 @@
 import type {
   ArtifactRecord,
+  BootstrapPayload,
   BenchmarkJobPayload,
   BootstrapRun,
   Experiment,
@@ -59,8 +60,8 @@ export const api = {
   createMachine: (payload: MachineCreatePayload) => sendJson<Machine>("/machines", payload),
   probeMachine: (machineId: string, dryRun = true) =>
     sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
-  bootstrapMachine: (machineId: string, profile: string, dryRun = true) =>
-    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, { profile, dry_run: dryRun }),
+  bootstrapMachine: (machineId: string, payload: BootstrapPayload) =>
+    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, payload),
   createModel: (payload: ModelCreatePayload) => sendJson<ModelRecord>("/models", payload),
   distributeModel: (modelId: string, payload: ModelDistributePayload) =>
     sendJson<ModelDistributeResult>(`/models/${modelId}/distribute`, payload),

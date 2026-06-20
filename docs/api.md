@@ -5,7 +5,7 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 ## Implemented Surfaces
 
 - Machines: CRUD, dry-run or real SSH probe, snapshots, credential masking.
-- Bootstrap: Full/standard/minimal/custom profiles, B1-B7 dry-run step results, manual opt-in real SSH execution, rerun single module.
+- Bootstrap: Full/standard/minimal/custom profiles, B1-B7 dry-run step results, manual opt-in real SSH execution, manual environment bypass, rerun single module.
 - Models and images: registry records, SHA256 metadata, dry-run plans and opt-in distribution for rsync/NFS/MinIO/HuggingFace/ModelScope.
 - Artifacts: report/log/snapshot/metrics/model/image references plus S3-compatible text upload.
 - Jobs: synchronous fake queue and Redis/RQ queue adapter with status, progress, logs, and result.
@@ -49,6 +49,9 @@ Default tests still do not install vLLM/SGLang, start a model, touch GPUs, or op
 
 - `dry_run=true`: uses `FakeExecutor`, suitable for default tests and demos.
 - `dry_run=false`: decrypts the stored machine credential and uses `AsyncSSHExecutor`.
+- `manual_environment=true`: skips B1-B7 command execution, records a `MANUAL_ENV` bootstrap step,
+  and marks the machine `ready` so the user can proceed after configuring the environment manually.
+  This path does not require an SSH credential and ignores `dry_run` for execution.
 
 The real SSH executor supports remote command execution with cwd/env/sudo/timeout plus SFTP
 upload/download. Password and PEM private-key credentials are supported. Host-key behavior follows
@@ -57,6 +60,16 @@ normal known-hosts behavior.
 
 This is implementation-complete for manual smoke tests but intentionally lacks real-machine E2E in
 this repository state.
+
+Manual environment bypass request:
+
+```json
+{
+  "profile": "full",
+  "manual_environment": true,
+  "manual_environment_note": "Configured vLLM and model cache outside InferenceLab."
+}
+```
 
 ## Model Distribution and Artifacts
 

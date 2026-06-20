@@ -293,10 +293,18 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   const [machineId, setMachineId] = useState("");
   const [profile, setProfile] = useState("full");
   const [dryRun, setDryRun] = useState(true);
+  const [manualEnvironment, setManualEnvironment] = useState(false);
+  const [manualEnvironmentNote, setManualEnvironmentNote] = useState("");
   const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
   const selectedMachineId = machineId || machines[0]?.id || "";
   const runBootstrap = useMutation({
-    mutationFn: () => api.bootstrapMachine(selectedMachineId, profile, dryRun),
+    mutationFn: () =>
+      api.bootstrapMachine(selectedMachineId, {
+        profile,
+        dry_run: dryRun,
+        manual_environment: manualEnvironment,
+        manual_environment_note: manualEnvironmentNote.trim() || undefined
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
       queryClient.invalidateQueries({ queryKey: ["machines"] });
@@ -344,11 +352,40 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
             <option value="full">full</option>
           </select>
           <label className="check-row">
-            <input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={dryRun}
+              disabled={manualEnvironment}
+              onChange={(event) => setDryRun(event.target.checked)}
+            />
             {t("dryRun")}
           </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={manualEnvironment}
+              onChange={(event) => setManualEnvironment(event.target.checked)}
+            />
+            {t("manualEnvironment")}
+          </label>
+          {manualEnvironment ? (
+            <input
+              className="manual-note"
+              value={manualEnvironmentNote}
+              maxLength={500}
+              placeholder={t("manualEnvironmentNote")}
+              onChange={(event) => setManualEnvironmentNote(event.target.value)}
+            />
+          ) : null}
           <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
-            <Play size={16} /> {runBootstrap.isPending ? t("running") : dryRun ? t("runDryRun") : t("runSsh")}
+            <Play size={16} />{" "}
+            {runBootstrap.isPending
+              ? t("running")
+              : manualEnvironment
+                ? t("confirmManualSetup")
+                : dryRun
+                  ? t("runDryRun")
+                  : t("runSsh")}
           </button>
         </div>
       </div>

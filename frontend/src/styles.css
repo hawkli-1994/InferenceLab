@@ -227,6 +227,10 @@ select {
   max-width: 260px;
 }
 
+.manual-note {
+  max-width: 420px;
+}
+
 .toolbar {
   align-items: center;
   justify-content: flex-end;

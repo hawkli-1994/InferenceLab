@@ -77,6 +77,7 @@ Preserve these constraints in code and docs:
 
 - `container` and `bare_metal` runtime modes are first-class and must not become two unrelated code paths.
 - `standard` and `intelligent` experiment modes are first-class. Standard mode is deterministic and software-driven; intelligent mode may use Agent/LLM/Deli_AutoResearch with Pi agent as the bounded worker executor.
+- Manual environment setup is a first-class bootstrap bypass. When `manual_environment=true`, record the bypass explicitly and do not pretend B1-B7 automatic steps ran.
 - Every experiment must be reproducible from recorded machine profile, model hash, runtime mode, framework version, framework params, prompt dataset, and launch command.
 - Remote machine changes must be modeled as explicit steps with `detect`, `apply`, and `verify` phases.
 - Remote step output must record command, exit code, stdout/stderr artifact location, changed files, snapshots, and failure hints.

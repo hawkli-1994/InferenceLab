@@ -35,6 +35,13 @@ export interface BootstrapRun {
   }>;
 }
 
+export interface BootstrapPayload {
+  profile: string;
+  dry_run: boolean;
+  manual_environment?: boolean;
+  manual_environment_note?: string;
+}
+
 export interface MachineSnapshot {
   id: string;
   machine_id: string;

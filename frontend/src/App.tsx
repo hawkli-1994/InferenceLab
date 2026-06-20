@@ -14,7 +14,8 @@ import {
   RotateCw,
   Search,
   Server,
-  TerminalSquare
+  TerminalSquare,
+  UserCheck
 } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -42,6 +43,7 @@ import type {
 } from "./types";
 
 type View = "machines" | "bootstrap" | "experiments" | "runs" | "compare" | "history" | "reports";
+type EnvironmentSetupMode = "automatic" | "manual";
 
 const navItems: Array<{ id: View; labelKey: MessageKey; icon: ElementType }> = [
   { id: "machines", labelKey: "machines", icon: Server },
@@ -293,18 +295,23 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   const [machineId, setMachineId] = useState("");
   const [profile, setProfile] = useState("full");
   const [dryRun, setDryRun] = useState(true);
-  const [manualEnvironment, setManualEnvironment] = useState(false);
+  const [environmentSetupMode, setEnvironmentSetupMode] =
+    useState<EnvironmentSetupMode>("automatic");
   const [manualEnvironmentNote, setManualEnvironmentNote] = useState("");
   const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
   const selectedMachineId = machineId || machines[0]?.id || "";
+  const manualEnvironment = environmentSetupMode === "manual";
   const runBootstrap = useMutation({
     mutationFn: () =>
-      api.bootstrapMachine(selectedMachineId, {
-        profile,
-        dry_run: dryRun,
-        manual_environment: manualEnvironment,
-        manual_environment_note: manualEnvironmentNote.trim() || undefined
-      }),
+      manualEnvironment
+        ? api.confirmManualEnvironment(
+            selectedMachineId,
+            manualEnvironmentNote.trim() || undefined
+          )
+        : api.bootstrapMachine(selectedMachineId, {
+            profile,
+            dry_run: dryRun
+          }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
       queryClient.invalidateQueries({ queryKey: ["machines"] });
@@ -333,7 +340,7 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
       </div>
       <div className="panel">
         <h2>{t("target")}</h2>
-        <div className="inline-controls">
+        <div className="inline-controls setup-controls">
           <select value={selectedMachineId} onChange={(event) => setMachineId(event.target.value)}>
             {machines.length === 0 ? (
               <option value="">No machines</option>
@@ -345,30 +352,40 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
               ))
             )}
           </select>
-          <select value={profile} onChange={(event) => setProfile(event.target.value)}>
-            <option value="minimal">minimal</option>
-            <option value="standard_container">standard container</option>
-            <option value="standard_bare_metal">standard bare metal</option>
-            <option value="full">full</option>
-          </select>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={dryRun}
-              disabled={manualEnvironment}
-              onChange={(event) => setDryRun(event.target.checked)}
-            />
-            {t("dryRun")}
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={manualEnvironment}
-              onChange={(event) => setManualEnvironment(event.target.checked)}
-            />
-            {t("manualEnvironment")}
-          </label>
-          {manualEnvironment ? (
+          <div className="setup-mode" aria-label={t("environmentSetupMode")}>
+            <button
+              type="button"
+              className={environmentSetupMode === "automatic" ? "active" : ""}
+              onClick={() => setEnvironmentSetupMode("automatic")}
+            >
+              <RotateCw size={15} /> {t("automaticSetup")}
+            </button>
+            <button
+              type="button"
+              className={environmentSetupMode === "manual" ? "active" : ""}
+              onClick={() => setEnvironmentSetupMode("manual")}
+            >
+              <UserCheck size={15} /> {t("manualSetup")}
+            </button>
+          </div>
+          {!manualEnvironment ? (
+            <>
+              <select value={profile} onChange={(event) => setProfile(event.target.value)}>
+                <option value="minimal">minimal</option>
+                <option value="standard_container">standard container</option>
+                <option value="standard_bare_metal">standard bare metal</option>
+                <option value="full">full</option>
+              </select>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(event) => setDryRun(event.target.checked)}
+                />
+                {t("dryRun")}
+              </label>
+            </>
+          ) : (
             <input
               className="manual-note"
               value={manualEnvironmentNote}
@@ -376,7 +393,7 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
               placeholder={t("manualEnvironmentNote")}
               onChange={(event) => setManualEnvironmentNote(event.target.value)}
             />
-          ) : null}
+          )}
           <button className="primary" disabled={!selectedMachineId || runBootstrap.isPending} onClick={() => runBootstrap.mutate()}>
             <Play size={16} />{" "}
             {runBootstrap.isPending

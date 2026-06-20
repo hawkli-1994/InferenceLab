@@ -53,6 +53,9 @@ Default tests still do not install vLLM/SGLang, start a model, touch GPUs, or op
   and marks the machine `ready` so the user can proceed after configuring the environment manually.
   This path does not require an SSH credential and ignores `dry_run` for execution.
 
+The workbench exposes the third path as a dynamic setup-mode selector: Automatic setup runs the
+selected bootstrap profile, while Manual setup records user-confirmed self-configuration.
+
 The real SSH executor supports remote command execution with cwd/env/sudo/timeout plus SFTP
 upload/download. Password and PEM private-key credentials are supported. Host-key behavior follows
 `INFLAB_SSH_KNOWN_HOSTS_POLICY`: `permissive` passes `known_hosts=None`; `strict` uses AsyncSSH's
@@ -60,16 +63,6 @@ normal known-hosts behavior.
 
 This is implementation-complete for manual smoke tests but intentionally lacks real-machine E2E in
 this repository state.
-
-Manual environment bypass request:
-
-```json
-{
-  "profile": "full",
-  "manual_environment": true,
-  "manual_environment_note": "Configured vLLM and model cache outside InferenceLab."
-}
-```
 
 ## Model Distribution and Artifacts
 

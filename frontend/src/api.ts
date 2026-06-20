@@ -62,6 +62,13 @@ export const api = {
     sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
   bootstrapMachine: (machineId: string, payload: BootstrapPayload) =>
     sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, payload),
+  confirmManualEnvironment: (machineId: string, note?: string) =>
+    sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, {
+      profile: "full",
+      dry_run: true,
+      manual_environment: true,
+      manual_environment_note: note
+    }),
   createModel: (payload: ModelCreatePayload) => sendJson<ModelRecord>("/models", payload),
   distributeModel: (modelId: string, payload: ModelDistributePayload) =>
     sendJson<ModelDistributeResult>(`/models/${modelId}/distribute`, payload),

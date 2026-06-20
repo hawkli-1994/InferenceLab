@@ -340,6 +340,22 @@ select {
   gap: 16px;
 }
 
+.discovery-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.discovery-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 16px;
+}
+
+.command-log-section {
+  grid-column: 1 / -1;
+  overflow-x: auto;
+}
+
 .settings-section,
 .validation-list {
   display: grid;
@@ -468,14 +484,23 @@ pre {
 }
 
 .status-succeeded,
-.status-ready {
+.status-ready,
+.status-discovery_ready {
   background: #dceee9;
   color: #176153;
 }
 
-.status-failed {
+.status-failed,
+.status-blocked,
+.status-discovery_blocked {
   background: #f6dede;
   color: #8a2424;
+}
+
+.status-partially_ready,
+.status-discovery_partially_ready {
+  background: #f8edd5;
+  color: #8a5b13;
 }
 
 .flow {

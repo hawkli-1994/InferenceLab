@@ -53,6 +53,46 @@ export interface MachineSnapshot {
   created_at: string;
 }
 
+export interface CommandResult {
+  command: {
+    command: string;
+    cwd: string | null;
+    env: Record<string, string>;
+    sudo: boolean;
+  };
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  stdout_uri: string | null;
+  stderr_uri: string | null;
+}
+
+export interface DiscoverySession {
+  id: string;
+  machine_id: string;
+  status: JobStatus;
+  verdict: "ready" | "partially_ready" | "blocked";
+  blockers: Array<{
+    key: string;
+    severity: "warning" | "blocking";
+    message: string;
+    evidence_command: string | null;
+  }>;
+  profile: Record<string, unknown>;
+  command_results: Record<string, CommandResult>;
+  allowlist: Array<{
+    id: string;
+    name: string;
+    command: string;
+    required: boolean;
+    timeout_seconds: number;
+  }>;
+  run: BootstrapRun;
+  snapshot: MachineSnapshot | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ModelRecord {
   id: string;
   name: string;

@@ -5,6 +5,7 @@ The MVP API is exposed under `/api/v1` and is documented by FastAPI at `/openapi
 ## Implemented Surfaces
 
 - Machines: CRUD, dry-run or real SSH probe, snapshots, credential masking.
+- Discovery: safe read-only allowlist sessions with machine profile, readiness verdict, blockers, and command logs.
 - Bootstrap: Pi environment workflow, explicit scripted Full/standard/minimal/custom profiles, B1-B7 dry-run step results, opt-in real SSH execution, rerun single module.
 - Models and images: registry records, SHA256 metadata, dry-run plans and opt-in distribution for rsync/NFS/MinIO/HuggingFace/ModelScope.
 - Artifacts: report/log/snapshot/metrics/model/image references plus S3-compatible text upload.
@@ -46,6 +47,20 @@ Default tests still do not install vLLM/SGLang, start a model, touch GPUs, or op
 
 ## Environment Setup Strategies
 
+`POST /api/v1/machines/{machine_id}/discovery-sessions` runs a safe discovery session before
+environment setup. `dry_run=true` returns a deterministic fake profile for local tests. With
+`dry_run=false`, the backend connects through the configured SSH credential and runs only the
+fixed read-only allowlist. The response includes:
+
+- `verdict`: `ready`, `partially_ready`, or `blocked`;
+- `blockers`: typed warning/blocking issues with evidence command ids;
+- `profile`: structured machine profile plus fingerprint;
+- `command_results`: command, exit code, stdout/stderr for every allowlisted command.
+
+`GET /api/v1/discovery-sessions` lists persisted discovery sessions. Sessions are stored as
+`SAFE_DISCOVERY` bootstrap runs plus machine snapshots, so they are auditable with the existing
+run model.
+
 `POST /api/v1/machines/{machine_id}/bootstrap` accepts `strategy`. Omit it to use
 `pi_workflow`; send `strategy=scripted` only for the fixed B1-B7 baseline. Unknown fields are
 rejected, so the removed `manual_environment` bypass cannot be used accidentally.
@@ -74,7 +89,7 @@ Host-key behavior follows `INFLAB_SSH_KNOWN_HOSTS_POLICY`: `permissive` passes `
 against arbitrary hosts.
 
 This is implementation-complete for manual smoke tests but intentionally lacks required
-real-machine E2E in this repository state. The opt-in read-only smoke command is:
+real-machine E2E in this repository state. The opt-in read-only discovery smoke command is:
 
 ```bash
 INFLAB_REAL_SSH_TARGET=rx@172.18.1.239 uv run pytest backend/tests/test_real_ssh_opt_in.py
@@ -151,7 +166,7 @@ The workbench now has a database-backed interactive launch path:
 
 - seed demo data into the database from `POST /api/v1/dev/seed-demo-data` or the `Seed DB` button;
 - register a demo model from the frontend;
-- create/probe a machine and run Pi workflow or explicitly selected scripted bootstrap;
+- create/probe a machine, run Safe Discovery, then run Pi workflow or explicitly selected scripted bootstrap;
 - distribute a model to the selected machine;
 - configure Agent Settings for Pi workflow and intelligent mode without affecting standard mode;
 - preview Agent tuning candidates through `POST /api/v1/experiments/plan`;

@@ -16,12 +16,13 @@ from inflab.benchmark import (
     validate_fair_comparison,
 )
 from inflab.config import AgentExecutorSettings
+from inflab.discovery import fake_safe_environment_discovery, run_safe_environment_discovery
 from inflab.executor import ExecutionContext, FakeExecutor
 from inflab.llm_provider import LiteLLMCandidateProvider
 from inflab.plugins import registry
 from inflab.probe import parse_nvidia_smi_csv
 from inflab.reports import export_report, render_markdown_report
-from inflab.schemas import BenchmarkPlanCreate, FrameworkParams, RunSpec
+from inflab.schemas import BenchmarkPlanCreate, CommandResult, FrameworkParams, RunSpec
 from inflab.security import decrypt_secret, encrypt_secret
 from inflab.steps import resolve_bootstrap_steps, run_steps
 from inflab.tuning import heuristic_prune, plan_candidates, standard_matrix
@@ -165,6 +166,61 @@ def test_probe_parses_nvidia_smi_csv() -> None:
             "cuda_version": "12.4",
         }
     ]
+
+
+def test_safe_discovery_fake_profile_is_ready() -> None:
+    result = fake_safe_environment_discovery(
+        {
+            "host": "10.0.0.10",
+            "port": 22,
+            "username": "seed",
+            "runtime_mode": "both",
+        }
+    )
+
+    assert result["verdict"] == "ready"
+    assert result["blockers"] == []
+    assert result["profile"]["discovery_version"] == "safe-readonly-v1"
+    assert {command["id"] for command in result["allowlist"]} >= {
+        "identity",
+        "gpu",
+        "python",
+        "docker",
+    }
+    assert all(command_result.stdout_uri for command_result in result["command_results"].values())
+    assert all(command_result.stderr_uri for command_result in result["command_results"].values())
+
+
+@pytest.mark.asyncio
+async def test_safe_discovery_records_allowlisted_commands_only() -> None:
+    class DiscoveryStubExecutor:
+        def __init__(self) -> None:
+            self.commands = []
+
+        async def run(self, command, *, timeout_seconds=30):
+            self.commands.append(command)
+            if command.command.startswith("id -un"):
+                return CommandResult(command=command, exit_code=0, stdout="seed\nhost\nLinux\n")
+            return CommandResult(command=command, exit_code=127, stderr="not installed")
+
+    executor = DiscoveryStubExecutor()
+    result = await run_safe_environment_discovery(
+        machine={
+            "host": "10.0.0.10",
+            "port": 22,
+            "username": "seed",
+            "runtime_mode": "container",
+        },
+        executor=executor,
+    )
+
+    assert result["verdict"] == "blocked"
+    assert [command.command for command in executor.commands] == [
+        command["command"] for command in result["allowlist"]
+    ]
+    assert set(result["command_results"]) == {command["id"] for command in result["allowlist"]}
+    assert result["command_results"]["identity"].stdout_uri.endswith("/identity/stdout.txt")
+    assert any(blocker["key"] == "gpu_unavailable" for blocker in result["blockers"])
 
 
 def test_tuning_candidates_are_valid_and_pruned() -> None:

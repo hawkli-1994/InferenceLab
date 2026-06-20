@@ -39,6 +39,10 @@ network/disk data through SSH. `POST /api/v1/machines/{machine_id}/bootstrap` us
 executor when `dry_run=true`; when `dry_run=false`, it decrypts the machine credential and runs
 B1-B7 through AsyncSSH.
 
+`POST /api/v1/machines/{machine_id}/discovery-sessions?dry_run=false` is the safer first real SSH
+path. It only runs fixed allowlisted read-only commands and records command output, profile,
+verdict, and blockers. It never writes files, uploads data, or uses sudo.
+
 This path is not covered by required real-machine E2E yet; unit tests mock AsyncSSH and verify the
 command, credential, timeout, SFTP, and streaming behavior. A read-only opt-in smoke test is
 available with:
@@ -47,8 +51,8 @@ available with:
 INFLAB_REAL_SSH_TARGET=rx@172.18.1.239 uv run pytest backend/tests/test_real_ssh_opt_in.py
 ```
 
-The smoke test only runs `id -un && hostname && uname -srm`; it does not write files, upload data,
-use sudo, or change machine configuration.
+The smoke test only runs the safe discovery allowlist; it does not write files, upload data, use
+sudo, or change machine configuration.
 
 ## Real Benchmark and Artifact Paths
 

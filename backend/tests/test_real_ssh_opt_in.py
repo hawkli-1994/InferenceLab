@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from inflab.discovery import run_safe_environment_discovery
 from inflab.executor import AsyncSSHExecutor, SSHConnectionConfig
 from inflab.schemas import CommandRecord
 
@@ -42,3 +43,33 @@ async def test_real_ssh_agent_read_only_smoke() -> None:
 
     assert result.exit_code == 0, result.stderr
     assert result.stdout.strip()
+
+
+@pytest.mark.asyncio
+async def test_real_safe_discovery_read_only_smoke() -> None:
+    username, host, port = _real_ssh_target()
+    executor = AsyncSSHExecutor(
+        SSHConnectionConfig(
+            host=host,
+            port=port,
+            username=username or None,
+            credential_type="ssh_agent",
+            secret=None,
+            known_hosts_policy="permissive",
+            connect_timeout_seconds=10,
+        )
+    )
+
+    result = await run_safe_environment_discovery(
+        machine={
+            "host": host,
+            "port": port,
+            "username": username or "",
+            "runtime_mode": "both",
+        },
+        executor=executor,
+    )
+
+    assert result["profile"]["identity"]["hostname"]
+    assert result["profile"]["fingerprint"]
+    assert set(result["command_results"]) == {command["id"] for command in result["allowlist"]}

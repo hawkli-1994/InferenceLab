@@ -6,6 +6,7 @@ import type {
   BootstrapPayload,
   BenchmarkJobPayload,
   BootstrapRun,
+  DiscoverySession,
   Experiment,
   ExperimentCreatePayload,
   ExperimentPlan,
@@ -54,6 +55,7 @@ export const api = {
   machines: () => getJson<Machine[]>("/machines"),
   models: () => getJson<ModelRecord[]>("/models"),
   bootstrapRuns: () => getJson<BootstrapRun[]>("/bootstrap-runs"),
+  discoverySessions: () => getJson<DiscoverySession[]>("/discovery-sessions"),
   experiments: () => getJson<Experiment[]>("/experiments"),
   trials: (experimentId: string) => getJson<Trial[]>(`/experiments/${experimentId}/trials`),
   metrics: (experimentId: string) => getJson<MetricsSummary[]>(`/experiments/${experimentId}/metrics`),
@@ -68,6 +70,11 @@ export const api = {
     sendJson<AgentSettingsValidation>("/agent-settings/validate", payload),
   probeMachine: (machineId: string, dryRun = true) =>
     sendJson<MachineSnapshot>(`/machines/${machineId}/probe?dry_run=${dryRun}`, {}),
+  runDiscoverySession: (machineId: string, dryRun = true) =>
+    sendJson<DiscoverySession>(
+      `/machines/${machineId}/discovery-sessions?dry_run=${dryRun}`,
+      {}
+    ),
   bootstrapMachine: (machineId: string, payload: BootstrapPayload) =>
     sendJson<BootstrapRun>(`/machines/${machineId}/bootstrap`, payload),
   runPiEnvironmentWorkflow: (

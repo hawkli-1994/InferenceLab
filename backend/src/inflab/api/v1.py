@@ -44,6 +44,7 @@ from inflab.db.models import (
 )
 from inflab.db.session import get_session
 from inflab.demo_data import seed_demo_data
+from inflab.discovery import fake_safe_environment_discovery, run_safe_environment_discovery
 from inflab.executor import AsyncSSHExecutor, ExecutionContext, FakeExecutor, SSHConnectionConfig
 from inflab.jobs import RQQueue, fake_queue
 from inflab.llm_provider import llm_candidates_or_empty
@@ -66,6 +67,7 @@ from inflab.schemas import (
     BootstrapRunRead,
     CommandRecord,
     CommandResult,
+    DiscoverySessionRead,
     EnvironmentSetupStrategy,
     ExperimentCreate,
     ExperimentMode,
@@ -177,6 +179,77 @@ def _bootstrap_read(run: BootstrapRun) -> BootstrapRunRead:
         step_results=run.step_results,
         failure_class=run.failure_class,
         failure_hint=run.failure_hint,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+
+
+def _machine_context(machine: Machine) -> dict[str, Any]:
+    return {
+        "id": machine.id,
+        "name": machine.name,
+        "host": machine.host,
+        "port": machine.port,
+        "username": machine.username,
+        "runtime_mode": machine.runtime_mode,
+    }
+
+
+def _discovery_step(discovery: dict[str, Any]) -> StepResult:
+    command_results: dict[str, CommandResult] = discovery["command_results"]
+    required_failures = [
+        spec
+        for spec in discovery["allowlist"]
+        if spec["required"] and command_results[spec["id"]].exit_code != 0
+    ]
+    exit_code = max(
+        (command_results[spec["id"]].exit_code for spec in required_failures), default=0
+    )
+    return StepResult(
+        id="SAFE_DISCOVERY",
+        name="Safe environment discovery",
+        status=StepStatus.failed if required_failures else StepStatus.unchanged,
+        phase_results=command_results,
+        commands=[result.command for result in command_results.values()],
+        exit_code=exit_code,
+        changed_files=[],
+        snapshots={
+            "configuration_mode": "safe_discovery",
+            "allowlist": discovery["allowlist"],
+            "verdict": discovery["verdict"],
+            "blockers": discovery["blockers"],
+            "profile": discovery["profile"],
+        },
+        failure_hint=(
+            None
+            if not required_failures
+            else "Required read-only discovery command failed; check SSH access and shell policy."
+        ),
+    )
+
+
+def _discovery_session_read(
+    run: BootstrapRun,
+    *,
+    snapshot: MachineSnapshot | None = None,
+) -> DiscoverySessionRead:
+    run_read = _bootstrap_read(run)
+    step = run.step_results[0] if run.step_results else {}
+    snapshots = step.get("snapshots", {})
+    phase_results = step.get("phase_results", {})
+    return DiscoverySessionRead(
+        id=run.id,
+        machine_id=run.machine_id,
+        status=run.status,
+        verdict=snapshots.get("verdict", "blocked"),
+        blockers=snapshots.get("blockers", []),
+        profile=snapshots.get("profile", {}),
+        command_results={
+            key: CommandResult.model_validate(value) for key, value in phase_results.items()
+        },
+        allowlist=snapshots.get("allowlist", []),
+        run=run_read,
+        snapshot=_snapshot_read(snapshot) if snapshot else None,
         created_at=run.created_at,
         updated_at=run.updated_at,
     )
@@ -887,6 +960,60 @@ async def probe_machine(
     session.commit()
     session.refresh(snapshot)
     return _snapshot_read(snapshot)
+
+
+@router.post("/machines/{machine_id}/discovery-sessions", response_model=DiscoverySessionRead)
+async def create_discovery_session(
+    machine_id: str,
+    dry_run: bool = Query(default=True),
+    session: Session = Depends(get_session),
+) -> DiscoverySessionRead:
+    machine = session.get(Machine, machine_id)
+    if machine is None:
+        raise _not_found("machine")
+    machine_context = _machine_context(machine)
+    discovery = (
+        fake_safe_environment_discovery(machine_context)
+        if dry_run
+        else await run_safe_environment_discovery(
+            machine=machine_context,
+            executor=_ssh_executor_for_machine(machine),
+        )
+    )
+    step = _discovery_step(discovery)
+    run_status = "failed" if step.exit_code != 0 else "succeeded"
+    profile = discovery["profile"]
+    fingerprint = profile["fingerprint"]
+    snapshot = MachineSnapshot(
+        machine_id=machine.id,
+        profile=profile,
+        fingerprint=fingerprint,
+        artifact_uri=f"memory://discovery/{machine.id}/{fingerprint}.json",
+    )
+    run = BootstrapRun(
+        machine_id=machine.id,
+        profile="custom",
+        status=run_status,
+        modules=[step.id],
+        step_results=[step.model_dump(mode="json")],
+        failure_class="safe_discovery_failed" if run_status == "failed" else None,
+        failure_hint=step.failure_hint if run_status == "failed" else None,
+    )
+    machine.machine_profile = profile
+    machine.fingerprint = fingerprint
+    machine.status = f"discovery_{discovery['verdict']}"
+    session.add(snapshot)
+    session.add(run)
+    session.commit()
+    session.refresh(snapshot)
+    session.refresh(run)
+    return _discovery_session_read(run, snapshot=snapshot)
+
+
+@router.get("/discovery-sessions", response_model=list[DiscoverySessionRead])
+def list_discovery_sessions(session: Session = Depends(get_session)) -> list[DiscoverySessionRead]:
+    rows = session.scalars(select(BootstrapRun).order_by(BootstrapRun.created_at.desc())).all()
+    return [_discovery_session_read(row) for row in rows if "SAFE_DISCOVERY" in row.modules]
 
 
 @router.get("/machines/{machine_id}/snapshots", response_model=list[MachineSnapshotRead])

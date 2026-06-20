@@ -161,6 +161,21 @@ class StepResult(BaseModel):
     failure_hint: str | None = None
 
 
+class DiscoveryBlocker(BaseModel):
+    key: str
+    severity: Literal["warning", "blocking"]
+    message: str
+    evidence_command: str | None = None
+
+
+class DiscoveryCommandSpec(BaseModel):
+    id: str
+    name: str
+    command: str
+    required: bool
+    timeout_seconds: int
+
+
 class BootstrapRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -185,6 +200,21 @@ class BootstrapRunRead(BaseModel):
     step_results: list[StepResult]
     failure_class: str | None
     failure_hint: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DiscoverySessionRead(BaseModel):
+    id: str
+    machine_id: str
+    status: JobStatus
+    verdict: Literal["ready", "partially_ready", "blocked"]
+    blockers: list[DiscoveryBlocker]
+    profile: dict[str, Any]
+    command_results: dict[str, CommandResult]
+    allowlist: list[DiscoveryCommandSpec]
+    run: BootstrapRunRead
+    snapshot: MachineSnapshotRead | None = None
     created_at: datetime
     updated_at: datetime
 

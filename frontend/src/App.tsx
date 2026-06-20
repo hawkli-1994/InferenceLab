@@ -29,6 +29,7 @@ import type {
   AgentSettingsUpdate,
   BenchmarkKind,
   BootstrapRun,
+  DiscoverySession,
   ExecutionMode,
   Experiment,
   ExperimentCreatePayload,
@@ -87,6 +88,14 @@ function optionalNumberValue(value: FormDataEntryValue | null) {
   }
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function previewText(value: string, limit = 220) {
+  const trimmed = value.trim();
+  if (trimmed.length <= limit) {
+    return trimmed || "none";
+  }
+  return `${trimmed.slice(0, limit)}...`;
 }
 
 function runSpecFromExperiment(experiment: Experiment) {
@@ -350,12 +359,25 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
   const [machineId, setMachineId] = useState("");
   const [profile, setProfile] = useState("full");
   const [dryRun, setDryRun] = useState(true);
+  const [discoveryDryRun, setDiscoveryDryRun] = useState(true);
   const [environmentSetupMode, setEnvironmentSetupMode] =
     useState<EnvironmentSetupMode>("pi_workflow");
   const [piWorkflowGoal, setPiWorkflowGoal] = useState("");
   const bootstrapRuns = useQuery({ queryKey: ["bootstrap-runs"], queryFn: api.bootstrapRuns });
+  const discoverySessions = useQuery({
+    queryKey: ["discovery-sessions"],
+    queryFn: api.discoverySessions
+  });
   const selectedMachineId = machineId || machines[0]?.id || "";
   const piWorkflow = environmentSetupMode === "pi_workflow";
+  const runDiscovery = useMutation({
+    mutationFn: () => api.runDiscoverySession(selectedMachineId, discoveryDryRun),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["discovery-sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["machines"] });
+      queryClient.invalidateQueries({ queryKey: ["bootstrap-runs"] });
+    }
+  });
   const runBootstrap = useMutation({
     mutationFn: () =>
       piWorkflow
@@ -375,6 +397,9 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
     }
   });
   const latestRun = bootstrapRuns.data?.[0] as BootstrapRun | undefined;
+  const latestDiscovery = (runDiscovery.data ?? discoverySessions.data?.[0]) as
+    | DiscoverySession
+    | undefined;
   const flowSteps = piWorkflow
     ? [
         t("workflowDiscover"),
@@ -480,6 +505,90 @@ function BootstrapView({ machines }: { machines: Machine[] }) {
             />
           ) : null}
         </div>
+      </div>
+      <div className="panel discovery-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>{t("safeDiscovery")}</h2>
+            <p>{t("safeDiscoveryDesc")}</p>
+          </div>
+          {latestDiscovery ? <StatusPill status={latestDiscovery.verdict} /> : null}
+        </div>
+        <div className="inline-controls">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={discoveryDryRun}
+              onChange={(event) => setDiscoveryDryRun(event.target.checked)}
+            />
+            {t("dryRun")}
+          </label>
+          <button
+            className="secondary"
+            disabled={!selectedMachineId || runDiscovery.isPending}
+            onClick={() => runDiscovery.mutate()}
+          >
+            <Search size={16} />{" "}
+            {runDiscovery.isPending ? t("running") : t("runSafeDiscovery")}
+          </button>
+        </div>
+        {latestDiscovery ? (
+          <div className="discovery-grid">
+            <section className="settings-section">
+              <h3>{t("discoveryBlockers")}</h3>
+              {latestDiscovery.blockers.length === 0 ? (
+                <p>{t("noBlockers")}</p>
+              ) : (
+                <div className="validation-list">
+                  {latestDiscovery.blockers.map((blocker) => (
+                    <div
+                      className={`validation-item validation-${
+                        blocker.severity === "blocking" ? "failed" : "warning"
+                      }`}
+                      key={blocker.key}
+                    >
+                      <strong>{blocker.key}</strong>
+                      <span>{blocker.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section className="settings-section">
+              <h3>{t("discoveryProfile")}</h3>
+              <pre className="prompt-preview">
+                {JSON.stringify(latestDiscovery.profile, null, 2)}
+              </pre>
+            </section>
+            <section className="settings-section command-log-section">
+              <h3>{t("discoveryCommands")}</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t("module")}</th>
+                    <th>{t("command")}</th>
+                    <th>{t("status")}</th>
+                    <th>stdout</th>
+                    <th>stderr</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(latestDiscovery.command_results).map(([key, result]) => (
+                    <tr key={key}>
+                      <td>{key}</td>
+                      <td>{result.command.command}</td>
+                      <td>
+                        <StatusPill status={result.exit_code === 0 ? "succeeded" : "failed"} />
+                      </td>
+                      <td>{previewText(result.stdout)}</td>
+                      <td>{previewText(result.stderr)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </div>
+        ) : null}
       </div>
       <div className="panel table-panel">
         <h2>{t("latestStepOutput")}</h2>

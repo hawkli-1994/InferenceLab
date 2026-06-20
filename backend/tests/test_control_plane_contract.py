@@ -48,7 +48,9 @@ def test_openapi_schema_exposes_mvp_routes(client: TestClient) -> None:
     expected_paths = {
         "/api/v1/machines",
         "/api/v1/machines/{machine_id}/probe",
+        "/api/v1/machines/{machine_id}/discovery-sessions",
         "/api/v1/machines/{machine_id}/bootstrap",
+        "/api/v1/discovery-sessions",
         "/api/v1/models",
         "/api/v1/benchmarks/plan",
         "/api/v1/benchmarks/jobs",
@@ -181,6 +183,65 @@ def test_machine_can_record_explicit_ssh_agent_auth(client: TestClient) -> None:
     machine = machine_response.json()
     assert machine["credential_type"] == "ssh_agent"
     assert machine["credential"] == "ssh_agent"
+
+
+def test_safe_discovery_session_records_profile_verdict_and_logs(client: TestClient) -> None:
+    machine_response = client.post(
+        "/api/v1/machines",
+        json={
+            "name": "discovery-target",
+            "host": "10.0.0.77",
+            "username": "seed",
+            "runtime_mode": "both",
+        },
+    )
+    assert machine_response.status_code == 201
+    machine = machine_response.json()
+
+    discovery_response = client.post(
+        f"/api/v1/machines/{machine['id']}/discovery-sessions",
+    )
+
+    assert discovery_response.status_code == 200
+    discovery = discovery_response.json()
+    assert discovery["status"] == "succeeded"
+    assert discovery["verdict"] == "ready"
+    assert discovery["blockers"] == []
+    assert discovery["run"]["modules"] == ["SAFE_DISCOVERY"]
+    assert discovery["snapshot"]["fingerprint"]
+    assert "identity" in discovery["command_results"]
+    assert {command["id"] for command in discovery["allowlist"]} >= {"identity", "gpu"}
+
+    machine_after = client.get(f"/api/v1/machines/{machine['id']}")
+    assert machine_after.status_code == 200
+    assert machine_after.json()["status"] == "discovery_ready"
+
+    list_response = client.get("/api/v1/discovery-sessions")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["id"] == discovery["id"]
+
+
+def test_real_safe_discovery_requires_configured_credential(client: TestClient) -> None:
+    machine_response = client.post(
+        "/api/v1/machines",
+        json={
+            "name": "discovery-no-credential",
+            "host": "10.0.0.78",
+            "username": "seed",
+            "runtime_mode": "both",
+        },
+    )
+    assert machine_response.status_code == 201
+    machine = machine_response.json()
+
+    discovery_response = client.post(
+        f"/api/v1/machines/{machine['id']}/discovery-sessions?dry_run=false",
+    )
+
+    assert discovery_response.status_code == 400
+    assert (
+        discovery_response.json()["error"]["message"] == "machine has no SSH credential configured"
+    )
 
 
 def test_legacy_manual_environment_payload_is_rejected(client: TestClient) -> None:
